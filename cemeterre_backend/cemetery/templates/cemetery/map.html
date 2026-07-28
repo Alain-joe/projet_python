@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Carte Interactive - Cimetière</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; }
+        #map { height: 100vh; width: 100%; background-color: #f4f4f4; }
+        .legend {
+            position: fixed; bottom: 20px; right: 20px; background: white;
+            padding: 15px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1000;
+        }
+        .legend-item { display: flex; align-items: center; margin: 6px 0; font-size: 13px; }
+        .legend-color { width: 16px; height: 16px; border-radius: 50%; margin-right: 10px; border: 2px solid white; }
+        .status-available { background: #496042; }
+        .status-reserved { background: #8B6B3F; }
+        .status-occupied { background: #8A4343; }
+        .status-non_exploitable { background: #8B8B8B; }
+        
+        .btn-reserver {
+            display: block; width: 100%; margin-top: 10px; padding: 8px;
+            background-color: #496042; color: white; border: none;
+            border-radius: 4px; font-weight: bold; cursor: pointer;
+            text-align: center; text-decoration: none; font-size: 13px;
+        }
+        .btn-reserver:hover { background-color: #3a4d34; }
+        
+        .btn-signaler {
+            display: block; width: 100%; margin-top: 8px; padding: 8px;
+            background-color: #F9A825; color: white; border: none;
+            border-radius: 4px; font-weight: bold; cursor: pointer;
+            text-align: center; text-decoration: none; font-size: 13px;
+        }
+        .btn-signaler:hover { background-color: #d48e1f; }
+        
+        .loading {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: white; display: flex; justify-content: center; 
+            align-items: center; z-index: 2000; font-size: 18px; color: #496042;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading" class="loading">Chargement de la carte...</div>
+    <div id="map"></div>
+    
+    <div class="legend">
+        <h4 style="margin: 0 0 10px 0; font-size: 14px;">Légende</h4>
+        <div class="legend-item"><div class="legend-color status-available"></div><span>Disponible</span></div>
+        <div class="legend-item"><div class="legend-color status-reserved"></div><span>Réservé</span></div>
+        <div class="legend-item"><div class="legend-color status-occupied"></div><span>Occupé</span></div>
+        <div class="legend-item"><div class="legend-color status-non_exploitable"></div><span>Non exploitable</span></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const token = "{{ token|escapejs }}";
+        const API_BASE = "http://127.0.0.1:8000";
+        const FLET_APP_URL = "http://127.0.0.1:8550";
+
+        const DEFAULT_LAT = -4.7878;
+        const DEFAULT_LNG = 11.8750;
+        const DEFAULT_ZOOM = 16;
+
+        const map = L.map('map').setView([DEFAULT_LAT, DEFAULT_LNG], DEFAULT_ZOOM);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+
+        const statusColors = { 'available': '#496042', 'reserved': '#8B6B3F', 'occupied': '#8A4343', 'non_exploitable': '#8B8B8B' };
+        const statusLabels = { 'available': 'Disponible', 'reserved': 'Réservé', 'occupied': 'Occupé', 'non_exploitable': 'Non exploitable' };
+
+        fetch(API_BASE + '/api/cemetery/config/', {
+            headers: { "Authorization": "Bearer " + token }
+        })
+        .then(res => {
+            if (!res.ok) throw new Error("Erreur chargement config: " + res.status);
+            return res.json();
+        })
+        .then(cemetery => {
+            if (cemetery.bounds) {
+                const bounds = [
+                    [cemetery.bounds.south, cemetery.bounds.west],
+                    [cemetery.bounds.north, cemetery.bounds.east]
+                ];
+                L.rectangle(bounds, { color: '#1A2B4C', weight: 3, opacity: 0.8, fillColor: '#1A2B4C', fillOpacity: 0.1 }).addTo(map)
+                 .bindPopup(`<b>${cemetery.name}</b><br>Ville: ${cemetery.city}<br>Superficie: ${cemetery.total_area} m²`);
+                map.fitBounds(bounds, { padding: [50, 50] });
+            } else if (cemetery.latitude && cemetery.longitude) {
+                map.setView([cemetery.latitude, cemetery.longitude], DEFAULT_ZOOM);
+            }
+            document.getElementById('loading').style.display = 'none';
+        })
+        .catch(err => {
+            console.error("❌ Erreur config:", err);
+            document.getElementById('loading').style.display = 'none';
+        });
+
+        fetch(API_BASE + '/api/cemetery/graves-geojson/', {
+            headers: { "Authorization": "Bearer " + token }
+        })
+        .then(res => {
+            if (!res.ok) throw new Error("Erreur chargement caveaux: " + res.status);
+            return res.json();
+        })
+        .then(data => {
+            const features = data.features || [];
+            features.forEach(feature => {
+                const props = feature.properties;
+                const coords = feature.geometry.coordinates;
+                const lng = coords[0];
+                const lat = coords[1];
+                const status = props.status || 'non_exploitable';
+                const color = statusColors[status] || '#8B8B8B';
+                const label = statusLabels[status] || status;
+                
+                const marker = L.circleMarker([lat, lng], {
+                    radius: 6, fillColor: color, color: '#ffffff', weight: 2, fillOpacity: 1.0
+                }).addTo(map);
+                
+                let popupContent = `<div style="text-align: center; min-width: 160px;">
+                    <b style="font-size: 15px; color: #1A2B4C;">${props.code}</b><br>
+                    <span style="color: ${color}; font-weight: bold; font-size: 13px; text-transform: uppercase;">${label}</span><br>
+                    <span style="font-size: 12px; color: #555; margin-top:4px; display:block;">Section: ${props.section || 'N/A'}</span>
+                    <span style="font-size: 13px; font-weight: bold; color: #1A2B4C; margin-top:4px; display:block;">${props.price} FCFA</span>`;
+
+                if (status === 'available') {
+                    const fletUrl = `${FLET_APP_URL}/reservations/nouvelle?grave_id=${props.id}&token=${encodeURIComponent(token)}`;
+                    popupContent += `<a href="${fletUrl}" class="btn-reserver">📝 Réserver ce caveau</a>`;
+                }
+                
+                // ✅ CORRECTION : Format strictement identique à la réservation + logs pour déboguer
+                console.log("Props du caveau:", props);
+                const reportUrl = `${FLET_APP_URL}/graves/signaler?grave_id=${props.id}&grave_code=${encodeURIComponent(props.code)}&token=${encodeURIComponent(token)}`;
+                console.log("URL de signalement générée:", reportUrl);
+                popupContent += `<a href="${reportUrl}" class="btn-signaler">⚠️ Signaler un problème</a>`;
+                
+                popupContent += `</div>`;
+                marker.bindPopup(popupContent);
+            });
+        })
+        .catch(err => {
+            console.error("Erreur chargement caveaux:", err);
+        });
+    </script>
+</body>
+</html>
