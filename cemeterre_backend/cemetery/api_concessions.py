@@ -1,10 +1,8 @@
 """
 projet_cimetiere/cemeterre_backend/cemetery/api_concessions.py
 API complète pour la gestion des concessions.
-CORRECTION DÉFINITIVE : Réorganisation des routes pour placer les routes statiques 
-AVANT les routes dynamiques ({concession_id}), évitant ainsi les erreurs 405.
+CORRECTION : Ajout explicite de reservation=None lors de la création de facture de renouvellement.
 """
-
 from ninja import Router
 from django.utils import timezone
 from ninja_jwt.authentication import JWTAuth
@@ -88,9 +86,8 @@ def create_concession(request, data: ConcessionIn):
     grave = get_object_or_404(Grave, id=data.grave_id)
     user = get_object_or_404(User, id=data.user_id)
 
-    if hasattr(grave, 'concession') and grave.concession.status == 'active':
-        raise HttpError(400, "Ce caveau possède déjà une concession active")
-
+    if hasattr(grave, 'concession') and grave.concession is not None:
+        raise HttpError(400, f"Ce caveau possède déjà une concession (statut : {grave.concession.status}).")
     concession = Concession.objects.create(
         grave=grave,
         user=user,
@@ -140,6 +137,15 @@ def concessions_expiring_soon(request, days: int = 90):
     ).select_related("grave", "user", "grave__section")
 
 
+@router.get("/concessions/mine", response=list[ConcessionOut])
+@require_role("client", "admin", "secretariat")
+def list_my_concessions(request):
+    """Liste les concessions du client connecté."""
+    return Concession.objects.filter(
+        user=request.auth
+    ).select_related("grave", "grave__section").order_by("-created_at")
+
+
 @router.get("/concessions/ready-for-creation", response=list[dict])
 @require_role("admin", "secretariat")
 def concessions_ready_for_creation(request):
@@ -180,7 +186,6 @@ def concessions_stats(request):
     temporaires = Concession.objects.filter(type_concession="temporaire").count()
     perpetuelles = Concession.objects.filter(type_concession="perpetuelle").count()
     
-    # ✅ CORRECTION : Calculer les concessions expirant dans 15 jours (pour correspondre au schéma)
     expiring_15 = Concession.objects.filter(
         status="active",
         type_concession__in=['temporaire', 'trentenaire', 'cinquantenaire'],
@@ -196,7 +201,6 @@ def concessions_stats(request):
     concessions_avec_renewal = Concession.objects.filter(renewed_count__gt=0).count()
     taux_renouvellement = (concessions_avec_renewal / total * 100) if total > 0 else 0
     
-    # ✅ CORRECTION : Retourner exactement les champs définis dans ConcessionStatsSchema
     return {
         "total": total,
         "actives": actives,
@@ -226,8 +230,8 @@ def create_concession_from_reservation(request, data: ConcessionCreateFromReserv
     if not facture:
         raise HttpError(400, "La facture associée à cette réservation doit être entièrement payée.")
     
-    if hasattr(reservation.grave, 'concession') and reservation.grave.concession.status == 'active':
-        raise HttpError(400, "Ce caveau possède déjà une concession active.")
+    if hasattr(reservation.grave, 'concession') and reservation.grave.concession is not None:
+        raise HttpError(400, f"Ce caveau possède déjà une concession (statut : {reservation.grave.concession.status}). Impossible d'en créer une nouvelle avec la structure actuelle.")
     
     concession = Concession.objects.create(
         grave=reservation.grave,
@@ -371,8 +375,10 @@ def renew_concession(request, concession_id: int, data: ConcessionRenewalIn):
     
     montant_renouvellement = data.montant if data.montant else concession.montant
 
+    # ✅ CORRECTION : Ajout explicite de reservation=None pour les renouvellements
     facture = Facture.objects.create(
         client=concession.user,
+        reservation=None,  # <-- C'est cette ligne qui règle le crash NotNullViolation
         numero=f"REN-{timezone.now().year}-{concession.renewed_count + 1:04d}",
         montant_total=montant_renouvellement,
         date_echeance=timezone.now().date() + timedelta(days=30),

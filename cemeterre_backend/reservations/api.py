@@ -1,10 +1,7 @@
 """
 projet_cimetiere/cemeterre_backend/reservations/api.py
 Routeurs Django Ninja pour les réservations.
-CORRECTIONS :
-- date_prevue_inhumation renseigné
-- Règle métier CDC : vérification de date dans confirmer_inhumation
-- Notifications étendues (validation, inhumation)
+CORRECTION : Utilisation de ReservationSchema (qui existe) au lieu de ReservationOut.
 """
 from ninja import Router, Schema
 from ninja.errors import HttpError
@@ -15,6 +12,7 @@ from django.db import transaction
 from datetime import date, datetime, time
 
 from .models import Reservation
+# ✅ CORRECTION : Suppression de ReservationOut, on utilise ReservationSchema
 from .schemas import ReservationCreateSchema, ReservationStatusSchema, ReservationSchema
 from cemetery.models import Grave, Inhumation
 from finance.models import Facture
@@ -25,7 +23,6 @@ from notifications.utils import (
     notifier_reservation_validee,
     notifier_reservation_annulee,
 )
-# ✅ NOUVEAU : Imports pour les notifications et emails étendus
 from notifications.utils_extended import (
     notifier_reservation_validee_avec_facture,
     notifier_inhumation_confirmee
@@ -57,7 +54,7 @@ class ConfirmerInhumationOut(Schema):
 # ROUTES STATIQUES (AVANT les routes dynamiques)
 # ==============================================================================
 
-@router.post("/manual/")
+@router.post("/manual/", response=dict)
 @require_role("admin", "secretariat", "client")
 def create_reservation_manual(request, data: ReservationCreateSchema):
     grave = get_object_or_404(Grave, id=data.grave_id)
@@ -89,12 +86,13 @@ def create_reservation_manual(request, data: ReservationCreateSchema):
     return {"id": reservation.id, "message": "Réservation créée avec succès."}
 
 
-@router.get("/mine/", response=list[ReservationSchema])
-@require_role("admin", "secretariat", "agent", "client")
+@router.get("/mine", response=list[ReservationSchema])
+@require_role("client", "admin", "secretariat")
 def list_my_reservations(request):
-    return Reservation.objects.select_related("user", "grave__section").filter(
+    """Liste les réservations du client connecté."""
+    return Reservation.objects.filter(
         user=request.auth
-    ).order_by("-reservation_date")
+    ).select_related("grave", "grave__section").order_by("-reservation_date")
 
 
 @router.get("/", response=list[ReservationSchema])
@@ -106,16 +104,7 @@ def list_reservations(request, status: str = None):
     return qs
 
 
-@router.get("/{reservation_id}/", response=ReservationSchema)
-@require_role("admin", "secretariat", "agent")
-def get_reservation(request, reservation_id: int):
-    return get_object_or_404(
-        Reservation.objects.select_related("user", "grave__section"), 
-        id=reservation_id
-    )
-
-
-@router.post("/")
+@router.post("/", response=dict)
 @require_role("admin", "agent", "client")
 def create_reservation(request, data: ReservationCreateSchema):
     if request.auth.role == "client":
@@ -148,7 +137,24 @@ def create_reservation(request, data: ReservationCreateSchema):
     return {"id": reservation.id, "message": "Réservation créée."}
 
 
-@router.put("/{reservation_id}/")
+# ==============================================================================
+# ROUTES DYNAMIQUES (APRÈS les routes statiques)
+# ==============================================================================
+
+@router.get("/{reservation_id}/", response=ReservationSchema)
+@require_role("admin", "secretariat", "agent", "client")
+def get_reservation(request, reservation_id: int):
+    res = get_object_or_404(
+        Reservation.objects.select_related("user", "grave__section"), 
+        id=reservation_id
+    )
+    # ✅ Sécurité : un client ne peut voir que sa propre réservation
+    if request.auth.role == "client" and res.user_id != request.auth.id:
+        raise HttpError(403, "Accès refusé.")
+    return res
+
+
+@router.put("/{reservation_id}/", response=dict)
 @require_role("admin", "secretariat")
 def update_reservation_status(request, reservation_id: int, data: ReservationStatusSchema):
     reservation = get_object_or_404(Reservation, id=reservation_id)
@@ -170,14 +176,12 @@ def update_reservation_status(request, reservation_id: int, data: ReservationSta
             statut="en_attente"
         )
         
-        # ✅ NOUVEAU : Notifications et email au client
         try:
             notifier_reservation_validee_avec_facture(reservation, facture)
             send_reservation_validated_email(reservation, facture)
         except Exception as e:
             print(f"⚠️ Erreur notification validation réservation : {e}")
         
-        # Notification existante
         try:
             notifier_reservation_validee(reservation)
         except Exception as e:
@@ -190,7 +194,6 @@ def update_reservation_status(request, reservation_id: int, data: ReservationSta
             notifier_reservation_annulee(reservation)
         except Exception as e:
             print(f"⚠️ Erreur notification : {e}")
-
         return {"message": "Réservation annulée. Caveau libéré."}
 
     return {"message": "Statut mis à jour"}
@@ -247,7 +250,13 @@ def confirmer_inhumation(request, reservation_id: int, payload: ConfirmerInhumat
         reservation.status = "inhumee"
         reservation.save()
 
-        # 3. Audit Trail
+        # 3. Mise à jour du statut du caveau
+        grave = reservation.grave
+        grave.status = "occupied"
+        grave.last_status_change = timezone.now()
+        grave.save(update_fields=["status", "last_status_change"])
+
+        # 4. Audit Trail
         try:
             from core.audit import log_action
             log_action(
@@ -255,12 +264,11 @@ def confirmer_inhumation(request, reservation_id: int, payload: ConfirmerInhumat
                 action="status_change",
                 model_name="Reservation/Inhumation",
                 object_id=reservation.id,
-                details=f"Inhumation confirmée. Caveau {reservation.grave.code} passé à 'occupied'."
+                details=f"Inhumation confirmée. Caveau {grave.code} passé à 'occupied'."
             )
         except ImportError:
             pass
         
-        # ✅ NOUVEAU : Notification au client après inhumation
         try:
             notifier_inhumation_confirmee(inhumation)
         except Exception as e:
@@ -273,7 +281,7 @@ def confirmer_inhumation(request, reservation_id: int, payload: ConfirmerInhumat
     return {
         "reservation_id": reservation.id,
         "inhumation_id": inhumation.id,
-        "grave_status": reservation.grave.status,
+        "grave_status": grave.status,
         "reservation_status": reservation.status,
         "message": message,
         "is_anticipée": is_anticipée,

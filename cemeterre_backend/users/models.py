@@ -1,8 +1,8 @@
 """
 users/models.py — Modèle User étendu avec RBAC, MFA et Audit Trail.
 Compatible Django 6.0.5
+CORRECTION : Ajout des champs address et city conformes au CDC.
 """
-
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.utils import timezone
@@ -11,9 +11,7 @@ import string
 
 
 class User(AbstractUser):
-    """
-    Modèle utilisateur personnalisé avec RBAC et MFA.
-    """
+    """Modèle utilisateur personnalisé avec RBAC et MFA."""
 
     ROLE_CHOICES = (
         ('admin', 'Administrateur'),
@@ -38,8 +36,24 @@ class User(AbstractUser):
     sex = models.CharField(max_length=1, choices=SEX_CHOICES, default='N', verbose_name="Sexe")
     birth_date = models.DateField(null=True, blank=True, verbose_name="Date de naissance")
 
-    # --- Téléphone (format international +242XXXXXXXX) ---
+    # --- Téléphone (format congolais 04/05/06XXXXXXXX) ---
     phone = models.CharField(max_length=13, blank=True, default='', verbose_name="Téléphone")
+
+    # ✅ NOUVEAU : Adresse et Ville (conformes CDC §9)
+    address = models.CharField(
+        max_length=200, 
+        blank=True, 
+        null=True, 
+        default='', 
+        verbose_name="Adresse"
+    )
+    city = models.CharField(
+        max_length=100, 
+        blank=True, 
+        null=True, 
+        default='', 
+        verbose_name="Ville"
+    )
 
     # --- Rôle et approbation ---
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='client', verbose_name="Rôle")

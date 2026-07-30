@@ -1,9 +1,8 @@
 """
 users/api.py — Endpoints pour la gestion des utilisateurs.
 Compatible Django Ninja + JWT.
-CORRECTIONS : Normalisation stricte des données, validation CDC.
+CORRECTION : Les champs address et city existent désormais dans le modèle.
 """
-
 from ninja import Router
 from ninja.errors import HttpError
 from ninja_jwt.authentication import JWTAuth
@@ -228,7 +227,7 @@ def create_internal_user(request, data: CreateInternalUserSchema):
     try:
         notifier_nouvel_utilisateur(user, cree_par=request.auth)
     except Exception as e:
-        print(f"️ Erreur notification nouvel utilisateur : {e}")
+        print(f"⚠️ Erreur notification nouvel utilisateur : {e}")
 
     return {
         "message": f"Compte {data.role} créé avec succès",
@@ -259,8 +258,9 @@ def list_users(request):
             "is_approved": u.is_approved,
             "created_at": u.created_at.isoformat() if u.created_at else None,
             "date_joined": u.date_joined.isoformat() if u.date_joined else None,
-            "address": u.address,
-            "city": u.city,
+            # ✅ CORRECTION : Les champs existent maintenant dans le modèle
+            "address": u.address or "",
+            "city": u.city or "",
         })
     return result
 
@@ -286,8 +286,9 @@ def get_user(request, user_id: int):
         "is_approved": user.is_approved,
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "date_joined": user.date_joined.isoformat() if user.date_joined else None,
-        "address": user.address,
-        "city": user.city,
+        # ✅ CORRECTION : Les champs existent maintenant dans le modèle
+        "address": user.address or "",
+        "city": user.city or "",
     }
 
 
@@ -325,6 +326,7 @@ def update_user(request, user_id: int, data: UserUpdateSchema):
         user.is_active = data.is_active
     if data.is_approved is not None:
         user.is_approved = data.is_approved
+    # ✅ CORRECTION : Mise à jour sécurisée des nouveaux champs
     if data.address is not None:
         user.address = data.address
     if data.city is not None:

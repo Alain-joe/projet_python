@@ -55,6 +55,14 @@ def list_exhumations(request, status: str = None):
         queryset = queryset.filter(status=status)
     return queryset.order_by("-created_at")
 
+@router.get("/exhumations/mine", response=list[ExhumationOut])
+@require_role("client", "admin", "secretariat")
+def list_my_exhumations(request):
+    """Liste les demandes d'exhumation du client connecté."""
+    return Exhumation.objects.filter(
+        demandeur=request.auth
+    ).select_related("grave", "inhumation").order_by("-created_at")
+
 @router.get("/exhumations/{exhumation_id}", response=ExhumationOut)
 def get_exhumation(request, exhumation_id: int):
     return get_object_or_404(Exhumation, id=exhumation_id)

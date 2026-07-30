@@ -1,5 +1,8 @@
-# projet_cimetiere/cemeterre_backend/finance/models.py
-
+"""
+projet_cimetiere/cemeterre_backend/finance/models.py
+CORRECTION : Le champ 'reservation' est maintenant un ForeignKey optionnel (null=True, blank=True)
+pour permettre la création de factures de renouvellement de concession sans réservation associée.
+"""
 from django.db import models
 from users.models import User
 from reservations.models import Reservation
@@ -14,7 +17,14 @@ class Facture(models.Model):
         ('annulee', 'Annulée'),
     ]
 
-    reservation = models.OneToOneField(Reservation, on_delete=models.CASCADE, related_name='facture')
+    # ✅ CORRECTION : Passage en ForeignKey avec null=True et blank=True pour les renouvellements
+    reservation = models.ForeignKey(
+        Reservation, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='factures'
+    )
     client = models.ForeignKey(User, on_delete=models.CASCADE, related_name='factures')
     numero = models.CharField(max_length=50, unique=True)
     montant_total = models.DecimalField(max_digits=10, decimal_places=2)
@@ -34,7 +44,7 @@ class Facture(models.Model):
     @property
     def montant_paye(self):
         # Ne somme que les paiements validés
-        return sum(p.montant for p in self.paiements.filter(statut_validation='valide'))
+        return sum(float(p.montant) for p in self.paiements.filter(statut_validation='valide'))
 
     @property
     def montant_restant(self):
@@ -47,7 +57,7 @@ class Facture(models.Model):
     @property
     def progression(self):
         if float(self.montant_total) == 0:
-            return 100
+            return 100.0
         return round((float(self.montant_paye) / float(self.montant_total)) * 100, 1)
 
     def update_statut(self):

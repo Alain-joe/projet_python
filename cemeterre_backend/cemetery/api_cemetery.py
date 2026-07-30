@@ -1,18 +1,17 @@
 """
 projet_cimetiere/cemeterre_backend/cemetery/api_cemetery.py
 API pour la gestion du cimetière.
-CORRECTIONS :
-- Ajout de espacement_caveaux dans initialize_cemetery
-- Ajout de l'endpoint initialize-complete pour création complète avec allées et sections
-- Ajout des endpoints GeoJSON pour sections et allées
-- Suppression de la définition dupliquée de initialize_cemetery_complete
+CORRECTION : Ajout de jwt_auth_or_query_param sur l'endpoint /config/ pour la carte.
 """
-
 from ninja import Router
 from ninja_jwt.authentication import JWTAuth
 from django.shortcuts import get_object_or_404
 from django.db.models import Count, Q
 import math
+
+# ✅ IMPORT DE LA FONCTION D'AUTHENTIFICATION FLEXIBLE
+from .api_graves import jwt_auth_or_query_param
+
 from .models import Cemetery, Grave, Section, Allee
 from .schemas import (
     CemeteryIn, CemeteryUpdate, CemeteryOut,
@@ -27,11 +26,10 @@ router = Router(auth=JWTAuth(), tags=["Cemeteries"])
 
 @router.get("/cemeteries/", response=list[CemeteryOut])
 def list_cemeteries(request):
-    """Liste les cimetières. Comme c'est un singleton, retourne toujours 0 ou 1 élément."""
     return Cemetery.objects.all()
 
 
-@router.get("/config/", response=CemeteryOut)
+@router.get("/config/", response=CemeteryOut, auth=jwt_auth_or_query_param) # ✅ CORRECTION ICI
 def get_cemetery_config(request):
     """Récupère la configuration du cimetière unique avec ses limites (bounds) pour la carte."""
     cemetery = Cemetery.objects.first()
@@ -74,17 +72,6 @@ def get_cemetery_config(request):
 @router.post("/cemeteries/initialize-complete/")
 @require_role("admin")
 def initialize_cemetery_complete(request, data: CemeteryInitializationSchema):
-    """
-    Initialise complètement le cimetière avec allées et sections automatiques.
-
-    Processus :
-    1. Crée/met à jour le cimetière
-    2. Nettoie les anciennes allées/sections (évite les doublons)
-    3. Crée les allées
-    4. Calcule les sections exploitables (découpage par les allées)
-    5. Crée les sections avec leur capacité
-    """
-    # Étape 1 : Créer ou mettre à jour le cimetière
     cemetery = Cemetery.objects.first()
 
     if cemetery:
@@ -94,12 +81,10 @@ def initialize_cemetery_complete(request, data: CemeteryInitializationSchema):
     else:
         cemetery = Cemetery.objects.create(**data.cemetery.dict())
 
-    # Nettoyage des anciennes données pour éviter les doublons
     print(f"🧹 Nettoyage des anciennes sections et allées pour le cimetière {cemetery.id}...")
     Allee.objects.filter(cemetery=cemetery).delete()
     Section.objects.filter(cemetery=cemetery).delete()
 
-    # Étape 2 : Calculer les bounds du cimetière
     bounds = GeometryService.calculate_cemetery_bounds(
         cemetery.latitude,
         cemetery.longitude,
@@ -108,8 +93,6 @@ def initialize_cemetery_complete(request, data: CemeteryInitializationSchema):
     )
 
     cemetery_polygon = GeometryService.create_cemetery_polygon(bounds)
-
-    # Étape 3 : Créer les allées et leurs polygones
     allee_polygons = []
     created_allees = []
 
@@ -138,13 +121,11 @@ def initialize_cemetery_complete(request, data: CemeteryInitializationSchema):
             "surface": allee.surface_calculee
         })
 
-    # Étape 4 : Découper le cimetière par les allées pour obtenir les sections
     sections_polygons = GeometryService.split_cemetery_by_allees(
         cemetery_polygon,
         allee_polygons
     )
 
-    # Étape 5 : Créer les sections
     created_sections = []
     section_names = data.section_names or []
 
@@ -189,7 +170,6 @@ def initialize_cemetery_complete(request, data: CemeteryInitializationSchema):
             "capacite": capacite
         })
 
-    # Étape 6 : Mettre à jour la capacité totale du cimetière
     total_capacity = sum(s["capacite"] for s in created_sections)
     cemetery.calculated_capacity = total_capacity
     cemetery.save()
@@ -211,7 +191,6 @@ def initialize_cemetery_complete(request, data: CemeteryInitializationSchema):
 @router.put("/cemeteries/{cemetery_id}/")
 @require_role("admin")
 def update_cemetery(request, cemetery_id: int, data: CemeteryUpdate):
-    """Modifier la configuration du cimetière (admin uniquement)"""
     cemetery = get_object_or_404(Cemetery, id=cemetery_id)
 
     for field, value in data.dict(exclude_unset=True).items():
@@ -227,7 +206,6 @@ def update_cemetery(request, cemetery_id: int, data: CemeteryUpdate):
 
 @router.get("/stats/")
 def get_cemetery_stats(request):
-    """Statistiques du cimetière"""
     cemetery = Cemetery.objects.first()
     if not cemetery:
         return {"error": "Aucun cimetière configuré"}
@@ -254,7 +232,6 @@ def get_cemetery_stats(request):
 
 @router.get("/allees/", response=list[AlleeOut])
 def list_allees(request, cemetery_id: int = None):
-    """Liste toutes les allées du cimetière."""
     queryset = Allee.objects.all()
     if cemetery_id:
         queryset = queryset.filter(cemetery_id=cemetery_id)
@@ -263,7 +240,6 @@ def list_allees(request, cemetery_id: int = None):
 
 @router.get("/allees/geojson/")
 def get_allees_geojson(request):
-    """Endpoint GeoJSON pour afficher les allées sur la carte."""
     cemetery = Cemetery.objects.first()
     if not cemetery:
         return {"type": "FeatureCollection", "features": []}
@@ -298,7 +274,6 @@ def get_allees_geojson(request):
 
 @router.get("/sections/geojson/")
 def get_sections_geojson(request):
-    """Endpoint GeoJSON pour afficher les sections sur la carte."""
     cemetery = Cemetery.objects.first()
     if not cemetery:
         return {"type": "FeatureCollection", "features": []}
