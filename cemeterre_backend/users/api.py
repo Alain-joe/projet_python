@@ -111,7 +111,7 @@ def login_step1(request, data: LoginStep1Schema):
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[user.email],
                 fail_silently=False,
-)
+            )
         except Exception as e:
             print(f"ERREUR EMAIL MFA: {e}")
 
