@@ -1,9 +1,4 @@
 flet==0.86.3
-flet-cli==0.86.3
-flet-desktop==0.86.3
-flet-geolocator==0.86.3
-flet-web==0.86.3
-flet-webview==0.86.3
 PyJWT==2.13.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
