@@ -1,6 +1,10 @@
 """
 views/dashboard/admin.py — Tableau de bord administratif.
-Compatible Flet 0.86.0
+Compatible Flet 0.86.3
+CORRECTIONS : 
+- Détection de largeur de fenêtre sécurisée.
+- Ajout du bouton "Générer la grille" à côté de la configuration.
+- Gestion propre des erreurs d'alertes.
 """
 from __future__ import annotations
 
@@ -168,7 +172,7 @@ def build_admin_dashboard_view(page: ft.Page, auth: AuthState) -> ft.View:
                     "desc": f"{len(pending_list)} réservation(s)",
                     "target": "/reservations",
                 })
-            
+
             ready_data = auth.api.get(Endpoints.CONCESSIONS_READY)
             if isinstance(ready_data, list):
                 ready_concessions_count = len(ready_data)
@@ -179,8 +183,14 @@ def build_admin_dashboard_view(page: ft.Page, auth: AuthState) -> ft.View:
                         "desc": "Factures payées, en attente de validation",
                         "target": "/concessions/ready",
                     })
-        except ApiError:
-            pass
+        except ApiError as exc:
+            msg = f"Alertes : {exc.message}"
+            error_text.value = (error_text.value + " • " + msg) if error_text.value else msg
+            error_text.visible = True
+        except Exception as exc:
+            msg = f"Alertes : erreur inattendue ({exc})"
+            error_text.value = (error_text.value + " • " + msg) if error_text.value else msg
+            error_text.visible = True
 
         activities.clear()
         loading.visible = False
@@ -313,7 +323,8 @@ def build_admin_dashboard_view(page: ft.Page, auth: AuthState) -> ft.View:
 
     load_dashboard()
     unread_count = get_unread_count()
-    width = page.width or 1200
+
+    width = getattr(page, 'window', page).width if hasattr(page, 'window') else (getattr(page, 'width', 1200) or 1200)
     device = get_device_type(width)
 
     line2 = ft.ResponsiveRow(
@@ -432,13 +443,24 @@ def build_admin_dashboard_view(page: ft.Page, auth: AuthState) -> ft.View:
                             ft.Text("Aperçu général de la gestion du cimetière.", size=14, color=Colors.NEUTRAL),
                         ]
                     ),
-                    ft.ElevatedButton(
-                        "⚙️ Configurer le cimetière",
-                        icon=ft.Icons.SETTINGS,
-                        bgcolor=Colors.PRIMARY,
-                        color=Colors.TEXT_ON_DARK,
-                        on_click=lambda _: page.go("/cimetiere/setup")
-                    ),
+                    # ✅ AJOUT DU BOUTON "GÉNÉRER LA GRILLE" ICI
+                    ft.Row([
+                        ft.ElevatedButton(
+                            "⚙️ Configurer le cimetière",
+                            icon=ft.Icons.SETTINGS,
+                            bgcolor=Colors.PRIMARY,
+                            color=Colors.TEXT_ON_DARK,
+                            on_click=lambda _: page.go("/cimetiere/setup")
+                        ),
+                        ft.Container(width=10),
+                        ft.ElevatedButton(
+                            "🗺️ Générer la grille",
+                            icon=ft.Icons.GRID_ON,
+                            bgcolor=PALETTE["purple"],
+                            color=Colors.TEXT_ON_DARK,
+                            on_click=lambda _: page.go("/graves/generate-grid")
+                        ),
+                    ])
                 ],
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             ),

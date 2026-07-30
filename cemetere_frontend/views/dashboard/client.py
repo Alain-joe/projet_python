@@ -1,6 +1,10 @@
 """
 views/dashboard/client.py — Espace personnel du client.
 Compatible Flet 0.86.0
+
+CORRECTION APPLIQUÉE :
+- Détection de largeur de fenêtre sécurisée (page.width seul pouvait
+  être None/obsolète) -> même pattern robuste que les autres vues.
 """
 from __future__ import annotations
 import flet as ft
@@ -194,7 +198,10 @@ def build_client_dashboard_view(page: ft.Page, auth: AuthState) -> ft.View:
             pass
 
     load_data()
-    width = page.width or 1200
+
+    # ✅ FIX : détection de largeur robuste — évite de figer le layout
+    # en mode desktop si page.width est None/obsolète.
+    width = getattr(page, 'window', page).width if hasattr(page, 'window') else (getattr(page, 'width', 1200) or 1200)
     device = get_device_type(width)
 
     return ft.View(

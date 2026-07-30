@@ -1,13 +1,13 @@
 """
 core/api.py — Client API centralisé (httpx synchrone) vers le backend Django Ninja.
-Compatible Flet 0.86.0
+Compatible Flet 0.86.3
 """
 from __future__ import annotations
 import httpx
 from dataclasses import dataclass
 from typing import Any, Optional
 
-BASE_URL = "http://127.0.0.1:8000/api"
+BASE_URL = "https://cemetiere-backend.onrender.com/api"
 TIMEOUT_SECONDS = 15.0
 
 class ApiError(Exception):
@@ -54,15 +54,10 @@ class ApiClient:
         if not self.token_provider.refresh_token:
             return False
         try:
-            resp = self._client.post(
-                "/users/token/refresh/",
-                json={"refresh": self.token_provider.refresh_token},
-            )
+            resp = self._client.post("/users/token/refresh/", json={"refresh": self.token_provider.refresh_token})
             if resp.status_code == 200:
                 data = resp.json()
-                self.token_provider.on_tokens_refreshed(
-                    data["access"], data.get("refresh", self.token_provider.refresh_token)
-                )
+                self.token_provider.on_tokens_refreshed(data["access"], data.get("refresh", self.token_provider.refresh_token))
                 return True
         except httpx.RequestError:
             pass
@@ -118,9 +113,7 @@ class ApiClient:
     def close(self) -> None:
         self._client.close()
 
-    # ==============================================================================
     # Méthodes de paiement
-    # ==============================================================================
     def payer_especes(self, facture_id: int, montant: float, reference: str = ""):
         return self.post(f"/finance/factures/{facture_id}/paiement/especes/", json={"montant": montant, "reference": reference})
 
@@ -137,21 +130,14 @@ class ApiClient:
         return self.post(f"/finance/paiements/{paiement_id}/confirmer/", json={})
 
     def get_virements_en_attente(self):
-        """Récupère la liste des virements bancaires en attente de confirmation"""
         return self.get("/finance/paiements/virements-en-attente")
 
     def get_historique_facture(self, facture_id: int):
         return self.get(f"/finance/factures/{facture_id}/historique/")
 
-    # ==============================================================================
-    # NOUVEAUX : Méthodes pour la gestion des signalements de caveaux
-    # ==============================================================================
+    # Méthodes de signalement
     def signaler_probleme_caveau(self, grave_id: int, motif: str, description: str = "", photos: list = None):
-        return self.post(f"/cemetery/graves/{grave_id}/signaler-probleme/", json={
-            "motif": motif,
-            "description": description,
-            "photos": photos or []
-        })
+        return self.post(f"/cemetery/graves/{grave_id}/signaler-probleme/", json={"motif": motif, "description": description, "photos": photos or []})
 
     def get_signalements(self, statut: str = None, grave_id: int = None):
         params = {}
@@ -167,12 +153,6 @@ class ApiClient:
 
     def rejeter_signalement(self, signalement_id: int, motif_rejet: str):
         return self.post(f"/cemetery/graves/signalements/{signalement_id}/rejeter/", json={"motif_rejet": motif_rejet})
-
-    def declarer_non_exploitable_direct(self, grave_id: int, motif: str):
-        return self.post(f"/cemetery/graves/{grave_id}/declarer-non-exploitable/", json={"motif": motif})
-
-    def remettre_en_exploitation(self, grave_id: int, nouveau_statut: str = "available"):
-        return self.post(f"/cemetery/graves/{grave_id}/remettre-en-exploitation/", json={"nouveau_statut": nouveau_statut})
 
 
 class Endpoints:
@@ -190,6 +170,11 @@ class Endpoints:
     GRAVES = "/cemetery/graves"
     SECTIONS_GEOJSON = "/cemetery/sections/geojson/"
     ALLEES_GEOJSON = "/cemetery/allees/geojson/"
+
+    # ✅ Routes spécifiques Client
+    RESERVATIONS_MINE = "/reservations/mine"
+    EXHUMATIONS_MINE = "/cemetery/exhumations/mine"
+    CONCESSIONS_MINE = "/cemetery/concessions/mine"
 
     RESERVATIONS_LIST = "/reservations/"
     RESERVATION_MANUAL = "/reservations/manual/"
@@ -257,6 +242,16 @@ class ApiService:
 
     def reject_user(self, user_id: int):
         return self.client.patch(Endpoints.USER_REJECT.format(user_id=user_id))
+
+    # ✅ Méthodes spécifiques Client
+    def get_reservations_mine(self):
+        return self.client.get(Endpoints.RESERVATIONS_MINE)
+
+    def get_exhumations_mine(self):
+        return self.client.get(Endpoints.EXHUMATIONS_MINE)
+
+    def get_concessions_mine(self):
+        return self.client.get(Endpoints.CONCESSIONS_MINE)
 
     def get_reservations(self, status: str | None = None):
         params = {"status": status} if status else None
@@ -342,9 +337,6 @@ class ApiService:
     def resiliate_concession(self, concession_id: int, motif: str):
         return self.client.put(Endpoints.concession_resilier(concession_id), json={"motif": motif})
 
-    # ==============================================================================
-    # Délégation des méthodes de signalement vers ApiClient
-    # ==============================================================================
     def signaler_probleme_caveau(self, grave_id: int, motif: str, description: str = "", photos: list = None):
         return self.client.signaler_probleme_caveau(grave_id, motif, description, photos)
 
@@ -359,9 +351,3 @@ class ApiService:
 
     def rejeter_signalement(self, signalement_id: int, motif_rejet: str):
         return self.client.rejeter_signalement(signalement_id, motif_rejet)
-
-    def declarer_non_exploitable_direct(self, grave_id: int, motif: str):
-        return self.client.declarer_non_exploitable_direct(grave_id, motif)
-
-    def remettre_en_exploitation(self, grave_id: int, nouveau_statut: str = "available"):
-        return self.client.remettre_en_exploitation(grave_id, nouveau_statut)

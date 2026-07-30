@@ -1,17 +1,30 @@
 """
 views/reservations/form.py — Formulaire de réservation avec DatePickers.
-Compatible Flet 0.86.3. Respect strict des contraintes de dates du CDC.
-CORRECTION : Redirection asynchrone simple sans page.views.clear().
+Compatible Flet 0.86.3.
+
+CORRECTION CRITIQUE : page.open() n'existe pas sur cette build de Flet
+('Page' object has no attribute 'open') — remplacé par show_overlay(),
+qui gère déjà ce cas de manière défensive (essaie page.open(), retombe
+sur l'ancien mécanisme page.overlay + .open=True sinon).
+
+VALIDATION (inchangée) : champs obligatoires, format nom/prénom, email,
+téléphone congolais, cohérence des dates.
 """
 from __future__ import annotations
+import re
 import flet as ft
 from urllib.parse import urlparse, parse_qs
-from datetime import datetime, timedelta
+from datetime import datetime
 import asyncio
 
 from core.auth import AuthState, Role
 from core.api import ApiError, Endpoints
 from core.theme import Colors, get_device_type, heading_style
+from core.ui_utils import show_overlay
+
+EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+PHONE_RE = re.compile(r'^(04|05|06)\d{7,}$')
+NOM_RE = re.compile(r'^[^\d]+$')
 
 
 def build_reservation_form_view(page: ft.Page, auth: AuthState) -> ft.View:
@@ -76,33 +89,34 @@ def build_reservation_form_view(page: ft.Page, auth: AuthState) -> ft.View:
     nom_field = ft.TextField(label="Nom *", border_radius=8, expand=True, value=user_info.get("last_name", "").capitalize() if user_info.get("last_name") else "")
     prenom_field = ft.TextField(label="Prénom *", border_radius=8, expand=True, value=user_info.get("first_name", "").capitalize() if user_info.get("first_name") else "")
     email_field = ft.TextField(label="Email *", keyboard_type=ft.KeyboardType.EMAIL, border_radius=8, expand=True, value=user_info.get("email", "").lower() if user_info.get("email") else "")
-    telephone_field = ft.TextField(label="Téléphone *", keyboard_type=ft.KeyboardType.PHONE, border_radius=8, expand=True, value=user_info.get("phone", "") if user_info.get("phone") else "")
-    
+    telephone_field = ft.TextField(label="Téléphone * (ex: 0612345678)", keyboard_type=ft.KeyboardType.PHONE, border_radius=8, expand=True, value=user_info.get("phone", "") if user_info.get("phone") else "")
+
     defunt_nom_field = ft.TextField(label="Nom du défunt *", border_radius=8, expand=True)
     defunt_prenom_field = ft.TextField(label="Prénom du défunt *", border_radius=8, expand=True)
-    
+
     date_naissance_field = ft.TextField(
-        label="Date de naissance (AAAA-MM-JJ)", 
-        read_only=True, border_radius=8, expand=True, 
+        label="Date de naissance (AAAA-MM-JJ)",
+        read_only=True, border_radius=8, expand=True,
         suffix=ft.Icon(ft.Icons.CALENDAR_TODAY, color=Colors.PRIMARY),
-        on_click=lambda _: date_naissance_picker.pick_date()
-    )
-    
-    date_deces_field = ft.TextField(
-        label="Date de décès (AAAA-MM-JJ) *", 
-        read_only=True, border_radius=8, expand=True, 
-        suffix=ft.Icon(ft.Icons.CALENDAR_TODAY, color=Colors.PRIMARY),
-        on_click=lambda _: date_deces_picker.pick_date()
-    )
-    
-    date_prevue_inhumation_field = ft.TextField(
-        label="Date prévue d'inhumation (AAAA-MM-JJ) *", 
-        read_only=True, border_radius=8, expand=True, 
-        suffix=ft.Icon(ft.Icons.CALENDAR_TODAY, color=Colors.PRIMARY),
-        on_click=lambda _: date_prevue_picker.pick_date()
+        # ✅ FIX : show_overlay() au lieu de page.open() (inexistant sur cette build)
+        on_click=lambda _: show_overlay(page, date_naissance_picker)
     )
 
-    error_text = ft.Text("", color=Colors.ERROR, size=13, visible=False)
+    date_deces_field = ft.TextField(
+        label="Date de décès (AAAA-MM-JJ) *",
+        read_only=True, border_radius=8, expand=True,
+        suffix=ft.Icon(ft.Icons.CALENDAR_TODAY, color=Colors.PRIMARY),
+        on_click=lambda _: show_overlay(page, date_deces_picker)
+    )
+
+    date_prevue_inhumation_field = ft.TextField(
+        label="Date prévue d'inhumation (AAAA-MM-JJ) *",
+        read_only=True, border_radius=8, expand=True,
+        suffix=ft.Icon(ft.Icons.CALENDAR_TODAY, color=Colors.PRIMARY),
+        on_click=lambda _: show_overlay(page, date_prevue_picker)
+    )
+
+    error_text = ft.Text("", color=Colors.ERROR, size=13, visible=False, weight=ft.FontWeight.W_600)
     success_text = ft.Text("", color=Colors.PRIMARY, size=13, visible=False)
     loading = ft.ProgressRing(visible=False, width=20, height=20)
 
@@ -110,12 +124,6 @@ def build_reservation_form_view(page: ft.Page, auth: AuthState) -> ft.View:
         content=ft.Row([ft.Icon(ft.Icons.SEND, color=Colors.TEXT_ON_DARK), ft.Text("Soumettre la réservation", color=Colors.TEXT_ON_DARK, weight=ft.FontWeight.BOLD)], spacing=5, alignment=ft.MainAxisAlignment.CENTER),
         style=ft.ButtonStyle(bgcolor=Colors.PRIMARY), width=float("inf"), height=50,
     )
-
-    required_fields = [
-        (nom_field, "Nom"), (prenom_field, "Prénom"), (email_field, "Email"), 
-        (telephone_field, "Téléphone"), (defunt_nom_field, "Nom du défunt"), 
-        (date_deces_field, "Date de décès"), (date_prevue_inhumation_field, "Date prévue d'inhumation")
-    ]
 
     def show_error(message: str) -> None:
         error_text.value = message
@@ -134,13 +142,60 @@ def build_reservation_form_view(page: ft.Page, auth: AuthState) -> ft.View:
         submit_button.disabled = is_loading
         page.update()
 
+    def _parse_date(raw: str) -> datetime.date | None:
+        try:
+            return datetime.strptime(raw.strip(), "%Y-%m-%d").date()
+        except (ValueError, AttributeError):
+            return None
+
     def validate() -> str | None:
+        required_fields = [
+            (nom_field, "Nom"), (prenom_field, "Prénom"), (email_field, "Email"),
+            (telephone_field, "Téléphone"), (defunt_nom_field, "Nom du défunt"),
+            (defunt_prenom_field, "Prénom du défunt"),
+            (date_deces_field, "Date de décès"), (date_prevue_inhumation_field, "Date prévue d'inhumation"),
+        ]
         for field, label in required_fields:
             if not (field.value or "").strip():
-                return f"Le champ « {label} » est obligatoire."
-        if date_deces_field.value and date_prevue_inhumation_field.value:
-            if date_deces_field.value > date_prevue_inhumation_field.value:
-                return "La date de décès ne peut pas être postérieure à la date prévue d'inhumation."
+                return f"❌ Le champ « {label} » est obligatoire."
+
+        for field, label in [
+            (nom_field, "Nom"), (prenom_field, "Prénom"),
+            (defunt_nom_field, "Nom du défunt"), (defunt_prenom_field, "Prénom du défunt"),
+        ]:
+            if not NOM_RE.match(field.value.strip()):
+                return f"❌ Le champ « {label} » ne doit pas contenir de chiffres."
+
+        if not EMAIL_RE.match(email_field.value.strip()):
+            return "❌ Adresse email invalide. Format attendu : exemple@domaine.com"
+
+        phone_clean = telephone_field.value.strip().replace(" ", "")
+        if not PHONE_RE.match(phone_clean):
+            return "❌ Numéro de téléphone invalide. Il doit commencer par 04, 05 ou 06 et contenir au moins 9 chiffres (ex: 0612345678)."
+
+        date_deces = _parse_date(date_deces_field.value)
+        date_prevue = _parse_date(date_prevue_inhumation_field.value)
+        date_naissance = _parse_date(date_naissance_field.value) if date_naissance_field.value else None
+
+        if date_deces is None:
+            return "❌ Date de décès invalide."
+        if date_deces > today:
+            return "❌ La date de décès ne peut pas être dans le futur."
+
+        if date_prevue is None:
+            return "❌ Date prévue d'inhumation invalide."
+        if date_prevue < today:
+            return "❌ La date prévue d'inhumation ne peut pas être antérieure à aujourd'hui."
+
+        if date_deces > date_prevue:
+            return "❌ La date de décès ne peut pas être postérieure à la date prévue d'inhumation."
+
+        if date_naissance is not None:
+            if date_naissance > today:
+                return "❌ La date de naissance ne peut pas être dans le futur."
+            if date_naissance >= date_deces:
+                return "❌ La date de naissance doit être antérieure à la date de décès."
+
         return None
 
     def on_submit_click(_: ft.ControlEvent) -> None:
@@ -165,19 +220,27 @@ def build_reservation_form_view(page: ft.Page, auth: AuthState) -> ft.View:
             auth.api.post(Endpoints.RESERVATION_MANUAL, json=payload)
         except ApiError as exc:
             set_loading(False)
-            show_error(exc.message or "Impossible de soumettre la réservation.")
+            show_error(f"❌ {exc.message or 'Impossible de soumettre la réservation.'}")
+            return
+        except Exception as exc:
+            set_loading(False)
+            show_error(f"❌ Erreur inattendue : {exc}")
             return
 
         set_loading(False)
         show_success("✅ Réservation soumise avec succès !")
-        
-        # ✅ CORRECTION : Redirection simple et sûre, préservant l'objet auth
+
         target_route = "/dashboard/admin" if auth.role in [Role.ADMIN, Role.SECRETARIAT] else "/dashboard/client"
-        
+
         async def delayed_redirect():
-            await asyncio.sleep(1.5)
-            page.go(target_route)
-            
+            try:
+                await asyncio.sleep(1.5)
+                page.views.clear()
+                page.route = target_route
+                page.go(target_route)
+            except Exception:
+                pass
+
         page.run_task(delayed_redirect)
 
     submit_button.on_click = on_submit_click
@@ -209,8 +272,12 @@ def build_reservation_form_view(page: ft.Page, auth: AuthState) -> ft.View:
         loading,
     ], spacing=14, scroll=ft.ScrollMode.AUTO)
 
-    width = getattr(page, 'window', page).width if hasattr(page, 'window') else (getattr(page, 'width', 1200) or 1200)
-    device = get_device_type(width)
+    window_width = None
+    if hasattr(page, "window") and page.window is not None:
+        window_width = page.window.width
+    if not window_width:
+        window_width = getattr(page, "width", None)
+    device = get_device_type(window_width or 1200)
 
     return ft.View(
         route="/reservations/nouvelle",

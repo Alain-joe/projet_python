@@ -1,19 +1,15 @@
 """
 views/graves/list.py — Liste administrative des sépultures (caveaux).
 Cahier des charges 2.3
-Compatible Flet 0.86.0
+Compatible Flet 0.86.3
+CORRECTION : Code complet, sans duplication, avec bouton de signalement pour Admin/Agent.
 """
-
 from __future__ import annotations
-
 import flet as ft
-
-from core.auth import AuthState
-from core.api import ApiError
+from core.auth import AuthState, Role
+from core.api import ApiError, Endpoints
 from core.theme import Colors, get_device_type, heading_style
 
-
-# Configuration des statuts
 STATUS_CONFIG = {
     "available": {"label": "Disponible", "color": "#496042", "icon": ft.Icons.CHECK_CIRCLE},
     "reserved": {"label": "Réservé", "color": "#8B6B3F", "icon": ft.Icons.EVENT_NOTE},
@@ -80,15 +76,23 @@ def build_graves_list_view(page: ft.Page, auth: AuthState) -> ft.View:
         page.update()
 
         try:
+            # ✅ Utilisation de la constante Endpoints.GRAVES (sans slash final)
+            data = auth.api.get(Endpoints.GRAVES)
+            graves.clear()
+            if isinstance(data, list):
+                graves.extend(data)
+            elif isinstance(data, dict):
+                graves.extend(data.get("items", data.get("results", data.get("data", []))))
+            else:
+                raise ValueError("Format inattendu")
+        except ApiError as exc:
+            error_text.value = f"Erreur de chargement : {exc.message}"
+            error_text.visible = True
+            graves.clear()
+        except Exception:
+            # Fallback sur le GeoJSON si la route classique échoue
             try:
-                data = auth.api.get("/cemetery/graves/")
-                if isinstance(data, list):
-                    graves.clear()
-                    graves.extend(data)
-                else:
-                    raise ValueError("Format inattendu")
-            except Exception:
-                geo_data = auth.api.get("/cemetery/graves-geojson/")
+                geo_data = auth.api.get("/cemetery/graves-geojson")
                 graves.clear()
                 for feature in geo_data.get("features", []):
                     props = feature.get("properties", {})
@@ -102,14 +106,10 @@ def build_graves_list_view(page: ft.Page, auth: AuthState) -> ft.View:
                         "latitude": coords[1] if coords else 0,
                         "longitude": coords[0] if coords else 0,
                     })
-        except ApiError as exc:
-            error_text.value = f"Erreur de chargement : {exc.message}"
-            error_text.visible = True
-            graves.clear()
-        except Exception:
-            error_text.value = "Impossible de contacter le serveur."
-            error_text.visible = True
-            graves.clear()
+            except Exception:
+                error_text.value = "Impossible de contacter le serveur."
+                error_text.visible = True
+                graves.clear()
 
         loading.visible = False
         render_graves()
@@ -148,7 +148,8 @@ def build_graves_list_view(page: ft.Page, auth: AuthState) -> ft.View:
                 )
             )
         else:
-            device = get_device_type(page.window.width or 1200)
+            width = getattr(page, 'window', page).width if hasattr(page, 'window') else (getattr(page, 'width', 1200) or 1200)
+            device = get_device_type(width)
             if device == "mobile":
                 for g in filtered_graves:
                     graves_container.controls.append(build_grave_card(g))
@@ -168,9 +169,30 @@ def build_graves_list_view(page: ft.Page, auth: AuthState) -> ft.View:
             ft.DataColumn(ft.Text("Actions", weight=ft.FontWeight.W_600)),
         ]
         rows = []
+        
+        # ✅ CORRECTION : Vérification du rôle pour le bouton de signalement
+        can_report = auth.role in [Role.ADMIN, Role.AGENT]
+        
         for g in data:
             status = g.get("status", "available")
             config = STATUS_CONFIG.get(status, STATUS_CONFIG["non_exploitable"])
+            
+            actions = [
+                ft.TextButton(
+                    content=ft.Text("Détails", size=12, color=Colors.PRIMARY),
+                    on_click=lambda _, grave=g: show_grave_details(grave)
+                )
+            ]
+            if can_report:
+                actions.append(
+                    ft.IconButton(
+                        icon=ft.Icons.WARNING,
+                        icon_color="#F9A825",
+                        tooltip="Signaler un problème",
+                        icon_size=20,
+                        on_click=lambda _, grave=g: page.go(f"/graves/signaler?grave_id={grave.get('id')}&grave_code={grave.get('code')}")
+                    )
+                )
 
             rows.append(ft.DataRow(cells=[
                 ft.DataCell(ft.Text(g.get("code", "?"), weight=ft.FontWeight.W_600)),
@@ -185,20 +207,7 @@ def build_graves_list_view(page: ft.Page, auth: AuthState) -> ft.View:
                     border_radius=12,
                 )),
                 ft.DataCell(ft.Text(f"{float(g.get('price', 0)):,.0f}".replace(",", " "))),
-                ft.DataCell(ft.Row([
-                    ft.TextButton(
-                        content=ft.Text("Détails", size=12, color=Colors.PRIMARY),
-                        on_click=lambda _, grave=g: show_grave_details(grave)
-                    ),
-                    # ✅ NOUVEAU : Bouton de signalement
-                    ft.IconButton(
-                        icon=ft.Icons.WARNING,
-                        icon_color="#F9A825",
-                        tooltip="Signaler un problème",
-                        icon_size=20,
-                        on_click=lambda _, grave=g: page.go(f"/graves/signaler?grave_id={grave.get('id')}&grave_code={grave.get('code')}")
-                    )
-                ])),
+                ft.DataCell(ft.Row(actions, spacing=4)),
             ]))
 
         return ft.DataTable(
@@ -218,6 +227,27 @@ def build_graves_list_view(page: ft.Page, auth: AuthState) -> ft.View:
     def build_grave_card(g: dict) -> ft.Control:
         status = g.get("status", "available")
         config = STATUS_CONFIG.get(status, STATUS_CONFIG["non_exploitable"])
+        
+        # ✅ CORRECTION : Vérification du rôle pour le bouton de signalement
+        can_report = auth.role in [Role.ADMIN, Role.AGENT]
+        
+        actions_row = [
+            ft.ElevatedButton(
+                content=ft.Text("Voir les détails", color=Colors.TEXT_ON_DARK),
+                style=ft.ButtonStyle(bgcolor=Colors.PRIMARY),
+                expand=True,
+                on_click=lambda _, grave=g: show_grave_details(grave)
+            )
+        ]
+        if can_report:
+            actions_row.append(
+                ft.IconButton(
+                    icon=ft.Icons.WARNING,
+                    icon_color="#F9A825",
+                    tooltip="Signaler un problème",
+                    on_click=lambda _, grave=g: page.go(f"/graves/signaler?grave_id={grave.get('id')}&grave_code={grave.get('code')}")
+                )
+            )
 
         return ft.Container(
             content=ft.Column([
@@ -233,21 +263,7 @@ def build_graves_list_view(page: ft.Page, auth: AuthState) -> ft.View:
                 ft.Text(f"Section : {g.get('section', '-')}", size=13, color=Colors.NEUTRAL),
                 ft.Text(f"Prix : {float(g.get('price', 0)):,.0f} FCFA".replace(",", " "), size=13, weight=ft.FontWeight.W_600),
                 ft.Divider(height=10, color=Colors.BORDER),
-                # ✅ NOUVEAU : Ligne avec le bouton détails et l'icône de signalement
-                ft.Row([
-                    ft.ElevatedButton(
-                        content=ft.Text("Voir les détails", color=Colors.TEXT_ON_DARK),
-                        style=ft.ButtonStyle(bgcolor=Colors.PRIMARY),
-                        expand=True,
-                        on_click=lambda _, grave=g: show_grave_details(grave)
-                    ),
-                    ft.IconButton(
-                        icon=ft.Icons.WARNING,
-                        icon_color="#F9A825",
-                        tooltip="Signaler un problème",
-                        on_click=lambda _, grave=g: page.go(f"/graves/signaler?grave_id={grave.get('id')}&grave_code={grave.get('code')}")
-                    )
-                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+                ft.Row(actions_row, spacing=8, alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
             ], spacing=8),
             padding=16,
             bgcolor="#FFFFFF",
@@ -269,9 +285,11 @@ def build_graves_list_view(page: ft.Page, auth: AuthState) -> ft.View:
         sb.open = True
         page.update()
 
+    # ✅ Appel unique de la fonction de chargement
     load_graves()
 
-    device = get_device_type(page.window.width or 1200)
+    width = getattr(page, 'window', page).width if hasattr(page, 'window') else (getattr(page, 'width', 1200) or 1200)
+    device = get_device_type(width)
 
     content_card = ft.Container(
         content=ft.Column(
@@ -308,6 +326,7 @@ def build_graves_list_view(page: ft.Page, auth: AuthState) -> ft.View:
         shadow=ft.BoxShadow(spread_radius=0, blur_radius=16, color="#0000000F"),
     )
 
+    # ✅ RETOUR EXPLICITE DE LA VUE (ce qui manquait dans ton ancien code)
     return ft.View(
         route="/graves",
         controls=[content_card],

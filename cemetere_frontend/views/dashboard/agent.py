@@ -1,7 +1,15 @@
 """
 views/dashboard/agent.py — Tableau de bord de l'Agent de terrain.
 Compatible Flet 0.86.3.
-CORRECTION : on_click placé directement sur les ElevatedButton (pas sur le Container).
+
+CORRECTIONS APPLIQUÉES :
+- BUG CRITIQUE : "width = page.window.width or 1200" pouvait lever une
+  AttributeError si page.window est None sur cette build/plateforme,
+  cassant tout le chargement du dashboard Agent. Corrigé avec le même
+  pattern défensif que les autres vues (hasattr + repli 1200).
+- Recherche de caveau : un champ vide faisait un page.update() silencieux
+  sans aucun message -> ajout d'un message explicite, même logique que
+  la recherche de défunt dans exhumations/request.py.
 """
 from __future__ import annotations
 import flet as ft
@@ -60,7 +68,7 @@ def build_agent_dashboard_view(page: ft.Page, auth: AuthState) -> ft.View:
             exh_list = exhumations if isinstance(exhumations, list) else exhumations.get("results", [])
         except Exception as exc:
             errors.append(f"Exhumations : {exc}")
-            
+
         try:
             sigs = auth.api.get_signalements(statut="en_attente")
             sig_list = sigs if isinstance(sigs, list) else sigs.get("results", [])
@@ -106,7 +114,6 @@ def build_agent_dashboard_view(page: ft.Page, auth: AuthState) -> ft.View:
             )
 
     def render_quick_actions() -> None:
-        """✅ CORRECTION : on_click directement sur le ElevatedButton, pas sur le Container"""
         actions_row.controls.clear()
         actions = [
             {"label": "Ouvrir la carte", "icon": ft.Icons.MAP, "route": "/carte", "color": PALETTE["blue"]},
@@ -114,18 +121,18 @@ def build_agent_dashboard_view(page: ft.Page, auth: AuthState) -> ft.View:
             {"label": "Consulter un caveau", "icon": ft.Icons.SEARCH, "route": "/carte", "color": None},
             {"label": "Mes signalements", "icon": ft.Icons.WARNING, "route": "/graves/signalements", "color": "#F9A825"},
         ]
-        
+
         for act in actions:
             actions_row.controls.append(
                 ft.Container(
                     content=ft.ElevatedButton(
                         content=ft.Row([ft.Icon(act["icon"], size=18), ft.Text(act["label"], size=12)], spacing=6),
                         style=ft.ButtonStyle(
-                            bgcolor=act["color"] or "#FFFFFF", 
+                            bgcolor=act["color"] or "#FFFFFF",
                             color=Colors.TEXT_ON_DARK if act["color"] else Colors.TEXT
                         ),
                         width=float("inf"),
-                        on_click=lambda _, r=act["route"]: page.go(r),  # ✅ ICI le on_click
+                        on_click=lambda _, r=act["route"]: page.go(r),
                     ),
                     col={"xs": 12, "sm": 6, "md": 3},
                 )
@@ -180,9 +187,14 @@ def build_agent_dashboard_view(page: ft.Page, auth: AuthState) -> ft.View:
     def do_search(_):
         code = (search_field.value or "").strip().lower()
         search_results.controls.clear()
+
+        # ✅ FIX : message explicite si le champ est vide, au lieu de
+        # ne rien faire silencieusement.
         if not code:
+            search_results.controls.append(ft.Text("❌ Veuillez saisir un code de caveau avant de lancer la recherche.", color=Colors.ERROR, size=12))
             page.update()
             return
+
         try:
             all_graves = auth.api.get("/cemetery/graves")
             graves_list = all_graves if isinstance(all_graves, list) else all_graves.get("results", [])
@@ -204,7 +216,10 @@ def build_agent_dashboard_view(page: ft.Page, auth: AuthState) -> ft.View:
         page.update()
 
     load_data()
-    width = page.window.width or 1200
+
+    # ✅ FIX : détection de largeur sécurisée — évite l'AttributeError si
+    # page.window est None sur cette build/plateforme.
+    width = getattr(page, 'window', page).width if hasattr(page, 'window') else (getattr(page, 'width', 1200) or 1200)
     device = get_device_type(width)
 
     return ft.View(

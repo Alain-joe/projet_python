@@ -79,7 +79,8 @@ async def main(page: ft.Page) -> None:
         elif clean_path == "/reservations/nouvelle" and url_grave_id:
             start_route = f"/reservations/nouvelle?grave_id={url_grave_id[0]}"
         else:
-            start_route = "/dashboard/admin" if is_auth else "/login"
+            # ✅ MODIFICATION ICI : /welcome au lieu de /login
+            start_route = "/dashboard/admin" if is_auth else "/welcome"
             
         print(f"🧭 [MAIN] Navigation vers : {start_route}")
         # ✅ Utilisation de page.go() qui est la méthode standard et sûre
@@ -88,5 +89,11 @@ async def main(page: ft.Page) -> None:
     await navigate_to_start()
 
 
+import os
+
 if __name__ == "__main__":
-    ft.run(main, view=ft.AppView.WEB_BROWSER, port=8550)
+    ft.run(
+        main,
+        view=ft.AppView.WEB_BROWSER,
+        port=int(os.environ.get("PORT", 8550))
+    )

@@ -1,6 +1,7 @@
 """
 views/shared/navigation.py — Barre de navigation avec indicateur de notifications.
-Compatible Flet 0.86.0
+Compatible Flet 0.86.3
+CORRECTION : Ajout des entrées spécifiques pour le rôle CLIENT.
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -22,13 +23,21 @@ NAV_ITEMS: list[NavItem] = [
     NavItem("Tableau de bord", ft.Icons.DASHBOARD, "/dashboard/secretariat", allowed_roles=(Role.SECRETARIAT,)),
     NavItem("Tableau de bord", ft.Icons.DASHBOARD, "/dashboard/agent", allowed_roles=(Role.AGENT,)),
     NavItem("Tableau de bord", ft.Icons.DASHBOARD, "/dashboard/client", allowed_roles=(Role.CLIENT,)),
+    
     NavItem("Mon Profil", ft.Icons.PERSON, "/profil"),
     NavItem("Carte interactive", ft.Icons.MAP, "/carte"),
+    
+    # ✅ NOUVEAUX ÉLÉMENTS CLIENT
+    NavItem("Mes réservations", ft.Icons.EVENT_NOTE, "/reservations/mine", allowed_roles=(Role.CLIENT,)),
+    NavItem("Mes exhumations", ft.Icons.UNARCHIVE, "/exhumations/client", allowed_roles=(Role.CLIENT,)),
+    NavItem("Mes paiements", ft.Icons.PAYMENTS, "/finance/client-paiements", allowed_roles=(Role.CLIENT,)),
+    
+    # ÉLÉMENTS ADMIN / SECRÉTARIAT / AGENT
     NavItem("Réservations", ft.Icons.EVENT_NOTE, "/reservations", allowed_roles=(Role.ADMIN, Role.SECRETARIAT, Role.AGENT)),
     NavItem("Concessions", ft.Icons.DESCRIPTION, "/concessions", allowed_roles=(Role.ADMIN, Role.SECRETARIAT)),
     NavItem("Concessions à créer", ft.Icons.PENDING_ACTIONS, "/concessions/ready", allowed_roles=(Role.ADMIN, Role.SECRETARIAT)),
     NavItem("Sépultures", ft.Icons.LOCATION_ON, "/graves", allowed_roles=(Role.ADMIN, Role.SECRETARIAT, Role.AGENT)),
-    NavItem("Signalements Caveaux", ft.Icons.WARNING, "/graves/signalements", allowed_roles=(Role.ADMIN, Role.SECRETARIAT, Role.AGENT)), # ✅ AJOUTÉ
+    NavItem("Signalements Caveaux", ft.Icons.WARNING, "/graves/signalements", allowed_roles=(Role.ADMIN, Role.AGENT)),
     NavItem("Exhumations", ft.Icons.UNARCHIVE, "/exhumations", allowed_roles=(Role.ADMIN, Role.SECRETARIAT, Role.AGENT)),
     NavItem("Inhumations", ft.Icons.HISTORY, "/inhumations", allowed_roles=(Role.ADMIN, Role.SECRETARIAT, Role.AGENT)),
     NavItem("Finances", ft.Icons.ACCOUNT_BALANCE_WALLET, "/finance", allowed_roles=(Role.ADMIN, Role.SECRETARIAT)),
@@ -176,7 +185,7 @@ def build_navigation(page: ft.Page, auth: AuthState) -> dict:
     except Exception:
         pass
 
-    width = page.width or 1200
+    width = getattr(page, 'window', page).width if hasattr(page, 'window') else (getattr(page, 'width', 1200) or 1200)
     device = get_device_type(width)
     
     if device == "mobile":

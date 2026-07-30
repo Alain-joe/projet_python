@@ -1,12 +1,58 @@
 """
 views/concessions/renew.py — Renouvellement d'une concession existante.
 Compatible Flet 0.86.0
+CORRECTION : auth.api.renew_concession(...) n'existe pas sur ApiClient (méthode
+purement synchrone get/post/put/patch/delete) — remplacé par un appel direct
+auth.api.put(Endpoints.concession_renew(...), json=...), sur le même modèle
+que le correctif appliqué à create_concession_from_reservation.
+CORRECTION AJOUTÉE : traduction en français des messages d'erreur bruts
+renvoyés par le backend (mêmes principe que sur les autres formulaires).
 """
 from __future__ import annotations
 import flet as ft
 from urllib.parse import urlparse, parse_qs
 from core.auth import AuthState
+from core.api import ApiError, Endpoints
 from core.theme import Colors, get_device_type, heading_style
+
+
+# ==============================================================================
+# TRADUCTION DES ERREURS BACKEND (fallback si le message est brut/anglais)
+# ==============================================================================
+_ERROR_TRANSLATIONS = {
+    "field required": "Ce champ est obligatoire.",
+    "this field is required": "Ce champ est obligatoire.",
+    "none is not an allowed value": "Ce champ ne peut pas être vide.",
+    "value is not a valid integer": "Une valeur numérique est attendue.",
+    "value is not a valid float": "Une valeur numérique est attendue.",
+    "value is not a valid date": "Format de date invalide.",
+    "ensure this value has at least": "La valeur saisie est trop petite ou trop courte.",
+    "ensure this value has at most": "La valeur saisie est trop grande ou trop longue.",
+    "string too short": "Le texte saisi est trop court.",
+    "string too long": "Le texte saisi est trop long.",
+    "not found": "Élément introuvable.",
+    "invalid": "Valeur invalide.",
+    "input should be a valid": "Le format de la valeur saisie est invalide.",
+    "input should be greater than": "La valeur saisie doit être supérieure à la limite autorisée.",
+}
+
+
+def _friendly_error(exc) -> str:
+    """
+    Traduit un message d'erreur backend (souvent en anglais, brut) vers un
+    message générique en français compréhensible.
+    """
+    raw = getattr(exc, "message", None) or str(exc)
+    raw_lower = raw.lower()
+
+    for needle, translation in _ERROR_TRANSLATIONS.items():
+        if needle in raw_lower:
+            return translation
+
+    if any(w in raw_lower for w in ["veuillez", "obligatoire", "invalide", "erreur", "échec"]):
+        return raw
+
+    return "Une erreur est survenue lors du traitement de la demande. Veuillez vérifier les champs et réessayer."
 
 
 def build_concession_renewal_view(page: ft.Page, auth: AuthState) -> ft.View:
@@ -63,8 +109,12 @@ def build_concession_renewal_view(page: ft.Page, auth: AuthState) -> ft.View:
             c_data = auth.api.get(f"/cemetery/concessions/{concession_id}")
             concession_data.update(c_data)
             montant_field.value = str(float(c_data.get("montant", 0)))
-        except Exception as exc:
-            error_text.value = f"Erreur de chargement : {exc}"
+        except ApiError as exc:
+            # ✅ CORRECTION : message backend traduit en français
+            error_text.value = f"❌ Erreur de chargement : {_friendly_error(exc)}"
+            error_text.visible = True
+        except Exception:
+            error_text.value = "❌ Impossible de charger les informations de la concession."
             error_text.visible = True
         finally:
             loading.visible = False
@@ -89,15 +139,22 @@ def build_concession_renewal_view(page: ft.Page, auth: AuthState) -> ft.View:
                 "duree_annees": int(duree_field.value) if type_field.value == "temporaire" else None,
                 "montant": float(montant_field.value) if montant_field.value else None,
             }
-            auth.api.renew_concession(int(concession_id), payload)
+            # ✅ Appel direct via ApiClient (get/post/put/patch/delete),
+            # au lieu de auth.api.renew_concession(...) qui n'existe pas.
+            auth.api.put(Endpoints.concession_renew(int(concession_id)), json=payload)
             
             sb = ft.SnackBar(content=ft.Text("✅ Concession renouvelée ! Une facture a été générée."), bgcolor="#496042")
             page.snack_bar = sb
             sb.open = True
             page.update()
             page.go(f"/concessions/detail?concession_id={concession_id}")
-        except Exception as exc:
-            error_text.value = f"❌ Échec du renouvellement : {exc}"
+        except ApiError as exc:
+            # ✅ CORRECTION : message backend traduit en français au lieu du texte brut
+            error_text.value = f"❌ Échec du renouvellement : {_friendly_error(exc)}"
+            error_text.visible = True
+            page.update()
+        except Exception:
+            error_text.value = "❌ Une erreur inattendue est survenue lors du renouvellement. Veuillez réessayer."
             error_text.visible = True
             page.update()
 

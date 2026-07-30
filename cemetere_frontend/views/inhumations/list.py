@@ -1,12 +1,11 @@
 """
 views/inhumations/list.py — Registre des inhumations (Historique).
-Compatible Flet 0.86.0
-CORRECTION : Gestion correcte des fonctions async pour on_click et on_submit (évite TypeError).
+Compatible Flet 0.86.3
+CORRECTION : Le bouton "Demander une exhumation" est masqué pour le Secrétariat.
 """
 from __future__ import annotations
 import flet as ft
-from datetime import datetime
-from core.auth import AuthState
+from core.auth import AuthState, Role
 from core.theme import Colors, get_device_type, heading_style
 
 def build_inhumations_list_view(page: ft.Page, auth: AuthState) -> ft.View:
@@ -42,11 +41,9 @@ def build_inhumations_list_view(page: ft.Page, auth: AuthState) -> ft.View:
             loading.visible = False
             page.update()
 
-    # ✅ CORRECTION : Fonction async pour être utilisée directement avec on_click et on_submit
     async def apply_filters(e=None):
         await load_inhumations(search_field.value)
 
-    # Assignation des événements async
     search_field.on_submit = apply_filters
 
     def render_list():
@@ -62,6 +59,24 @@ def build_inhumations_list_view(page: ft.Page, auth: AuthState) -> ft.View:
                 grave_code = inh.get("grave_code", "?")
                 agent = inh.get("agent_username", "Non renseigné")
 
+                # ✅ CORRECTION : Le bouton "Demander une exhumation" n'est visible que pour Admin et Agent
+                actions = [
+                    ft.IconButton(
+                        icon=ft.Icons.VISIBILITY,
+                        tooltip="Voir détails",
+                        on_click=lambda _, i=inh: show_details_dialog(i),
+                    )
+                ]
+                if auth.role in [Role.ADMIN, Role.AGENT]:
+                    actions.append(
+                        ft.IconButton(
+                            icon=ft.Icons.UNARCHIVE,
+                            icon_color=Colors.ERROR,
+                            tooltip="Demander une exhumation",
+                            on_click=lambda _, i=inh: show_request_exhumation_dialog(i),
+                        )
+                    )
+
                 list_container.controls.append(
                     ft.Container(
                         content=ft.Row([
@@ -74,19 +89,7 @@ def build_inhumations_list_view(page: ft.Page, auth: AuthState) -> ft.View:
                                 ft.Text(f"Date : {date_str}", size=12, weight=ft.FontWeight.W_600),
                                 ft.Text(f"Heure : {heure_str or 'N/A'}", size=11, color=Colors.NEUTRAL),
                             ], spacing=4, horizontal_alignment=ft.CrossAxisAlignment.END),
-                            ft.Row([
-                                ft.IconButton(
-                                    icon=ft.Icons.VISIBILITY,
-                                    tooltip="Voir détails",
-                                    on_click=lambda _, i=inh: show_details_dialog(i),
-                                ),
-                                ft.IconButton(
-                                    icon=ft.Icons.UNARCHIVE,
-                                    icon_color=Colors.ERROR,
-                                    tooltip="Demander une exhumation",
-                                    on_click=lambda _, i=inh: show_request_exhumation_dialog(i),
-                                ),
-                            ], spacing=4),
+                            ft.Row(actions, spacing=4),
                         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                         padding=14, bgcolor="#FFFFFF", border_radius=10, border=ft.Border.all(1, Colors.BORDER),
                     )
@@ -117,7 +120,7 @@ def build_inhumations_list_view(page: ft.Page, auth: AuthState) -> ft.View:
                 dialog.open = False
                 page.update()
                 
-                sb = ft.SnackBar(content=ft.Text("✅ Demande d'exhumation envoyée à l'administration."), bgcolor="#496042")
+                sb = ft.SnackBar(content=ft.Text("✅ Demande d'exhumation envoyée à l'administration.", color=Colors.TEXT_ON_DARK), bgcolor="#496042")
                 page.snack_bar = sb
                 sb.open = True
                 page.update()
@@ -178,8 +181,6 @@ def build_inhumations_list_view(page: ft.Page, auth: AuthState) -> ft.View:
         page.update()
 
     device = get_device_type(page.width or 1200)
-    
-    # Chargement initial
     page.run_task(load_inhumations)
 
     return ft.View(
@@ -188,7 +189,6 @@ def build_inhumations_list_view(page: ft.Page, auth: AuthState) -> ft.View:
             ft.Row([
                 ft.Text("Registre des Inhumations", style=heading_style(size=22)),
                 ft.Container(expand=True),
-                # ✅ CORRECTION : on_click appelle directement la fonction async apply_filters
                 ft.ElevatedButton("🔄 Actualiser", icon=ft.Icons.REFRESH, bgcolor=Colors.PRIMARY, color=Colors.TEXT_ON_DARK, on_click=apply_filters),
             ]),
             ft.Container(height=10),

@@ -1,8 +1,21 @@
 """
 views/inhumations/confirm.py — Formulaire de confirmation d'inhumation pour l'Agent.
-Compatible Flet 0.86.3. Utilise DatePicker et TimePicker natifs.
+Compatible Flet 0.86.3.
+
+CORRECTION CRITIQUE : page.open() n'existe pas sur cette build de Flet
+('Page' object has no attribute 'open') — remplacé par show_overlay(),
+défensif (essaie page.open(), retombe sur page.overlay + .open=True
+sinon).
+
+CORRECTION AJOUTÉE :
+- observations_field : keyboard_type=TEXT forcé explicitement (même
+  précaution que sur le formulaire d'exhumation, pour éviter un clavier
+  numérique par défaut sur un champ multiline).
+- _friendly_error() : traduction en français des messages d'erreur bruts
+  renvoyés par le backend, affichés à la place du texte anglais brut.
 """
 from __future__ import annotations
+import asyncio
 import flet as ft
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime, timedelta
@@ -10,6 +23,46 @@ from datetime import datetime, timedelta
 from core.auth import AuthState, Role
 from core.api import ApiError, Endpoints
 from core.theme import Colors, get_device_type, heading_style
+from core.ui_utils import show_overlay
+
+
+# ==============================================================================
+# TRADUCTION DES ERREURS BACKEND (fallback si le message est brut/anglais)
+# ==============================================================================
+_ERROR_TRANSLATIONS = {
+    "field required": "Ce champ est obligatoire.",
+    "this field is required": "Ce champ est obligatoire.",
+    "none is not an allowed value": "Ce champ ne peut pas être vide.",
+    "value is not a valid integer": "Une valeur numérique est attendue.",
+    "value is not a valid date": "Format de date invalide.",
+    "value is not a valid datetime": "Format de date/heure invalide.",
+    "ensure this value has at least": "Le texte saisi est trop court.",
+    "ensure this value has at most": "Le texte saisi est trop long.",
+    "string too short": "Le texte saisi est trop court.",
+    "string too long": "Le texte saisi est trop long.",
+    "not found": "Élément introuvable.",
+    "invalid": "Valeur invalide.",
+}
+
+
+def _friendly_error(exc) -> str:
+    """
+    Traduit un message d'erreur backend (souvent en anglais, brut) vers un
+    message générique en français compréhensible. Utilisé en dernier
+    recours, quand la validation locale n'a rien détecté mais que le
+    serveur refuse quand même la requête.
+    """
+    raw = getattr(exc, "message", None) or str(exc)
+    raw_lower = raw.lower()
+
+    for needle, translation in _ERROR_TRANSLATIONS.items():
+        if needle in raw_lower:
+            return translation
+
+    if any(w in raw_lower for w in ["veuillez", "obligatoire", "invalide", "erreur", "échec"]):
+        return raw
+
+    return "Une erreur est survenue lors du traitement de la demande. Veuillez réessayer."
 
 
 def build_inhumation_confirm_view(page: ft.Page, auth: AuthState) -> ft.View:
@@ -21,14 +74,13 @@ def build_inhumation_confirm_view(page: ft.Page, auth: AuthState) -> ft.View:
         return ft.View(route="/inhumations/confirm", controls=[])
 
     loading = ft.ProgressRing(visible=True, width=40, height=40)
-    error_text = ft.Text("", color=Colors.ERROR, size=13, visible=False)
-    
+    error_text = ft.Text("", color=Colors.ERROR, size=13, visible=False, weight=ft.FontWeight.W_600)
+
     reservation_data = {}
 
-    # --- PICKERS ---
     date_reelle_picker = ft.DatePicker(
-        first_date=datetime.now() - timedelta(days=3650), # 10 ans en arrière
-        last_date=datetime.now(), # ✅ Pas dans le futur
+        first_date=datetime.now() - timedelta(days=3650),
+        last_date=datetime.now(),
         on_change=lambda e: setattr(date_reelle_field, 'value', e.control.value.strftime("%Y-%m-%d") if e.control.value else ""),
     )
     page.overlay.append(date_reelle_picker)
@@ -38,31 +90,38 @@ def build_inhumation_confirm_view(page: ft.Page, auth: AuthState) -> ft.View:
     )
     page.overlay.append(time_picker)
 
-    # --- CHAMPS ---
     date_reelle_field = ft.TextField(
-        label="Date réelle d'inhumation (AAAA-MM-JJ) *", 
-        read_only=True, 
-        border_radius=8, 
+        label="Date réelle d'inhumation (AAAA-MM-JJ) *",
+        read_only=True,
+        border_radius=8,
         suffix=ft.Icon(ft.Icons.CALENDAR_TODAY, color=Colors.PRIMARY),
-        on_click=lambda _: date_reelle_picker.pick_date()
+        # ✅ FIX : show_overlay() au lieu de page.open() (inexistant sur cette build)
+        on_click=lambda _: show_overlay(page, date_reelle_picker)
     )
-    
+
     heure_field = ft.TextField(
-        label="Heure d'inhumation (HH:MM) *", 
-        read_only=True, 
-        border_radius=8, 
+        label="Heure d'inhumation (HH:MM) *",
+        read_only=True,
+        border_radius=8,
         suffix=ft.Icon(ft.Icons.ACCESS_TIME, color=Colors.PRIMARY),
-        on_click=lambda _: time_picker.pick_time()
+        on_click=lambda _: show_overlay(page, time_picker)
     )
-    
+
     observations_field = ft.TextField(
-        label="Observations (optionnel)", 
-        multiline=True, 
-        min_lines=3, 
-        border_radius=8
+        label="Observations (optionnel)",
+        multiline=True,
+        min_lines=3,
+        border_radius=8,
+        keyboard_type=ft.KeyboardType.TEXT,  # ✅ CORRECTION : forcé explicitement
     )
 
     info_container = ft.Container(visible=False)
+
+    def show_error(message: str) -> None:
+        error_text.value = message
+        error_text.visible = True
+        loading.visible = False
+        page.update()
 
     def load_reservation():
         loading.visible, error_text.visible = True, False
@@ -70,8 +129,7 @@ def build_inhumation_confirm_view(page: ft.Page, auth: AuthState) -> ft.View:
         try:
             data = auth.api.get(f"/reservations/{reservation_id}/")
             reservation_data.update(data)
-            
-            # Mise à jour de la date min du picker en fonction de la date de réservation
+
             res_date_str = data.get("reservation_date", "")[:10]
             if res_date_str:
                 try:
@@ -86,9 +144,10 @@ def build_inhumation_confirm_view(page: ft.Page, auth: AuthState) -> ft.View:
                 ft.Text(f"Date prévue : {data.get('date_prevue_inhumation', 'N/A')}", size=13, color=Colors.NEUTRAL),
             ], spacing=8)
             info_container.visible = True
-            
+
         except ApiError as exc:
-            error_text.value = f"Erreur : {exc.message}"
+            # ✅ CORRECTION : message backend traduit en français
+            error_text.value = f"Erreur : {_friendly_error(exc)}"
             error_text.visible = True
         finally:
             loading.visible = False
@@ -96,9 +155,7 @@ def build_inhumation_confirm_view(page: ft.Page, auth: AuthState) -> ft.View:
 
     def on_confirm_click(_: ft.ControlEvent):
         if not date_reelle_field.value or not heure_field.value:
-            error_text.value = "❌ La date et l'heure réelles sont obligatoires."
-            error_text.visible = True
-            page.update()
+            show_error("❌ La date et l'heure réelles sont obligatoires.")
             return
 
         error_text.visible = False
@@ -107,30 +164,29 @@ def build_inhumation_confirm_view(page: ft.Page, auth: AuthState) -> ft.View:
 
         try:
             payload = {
-                "date_inhumation": f"{date_reelle_field.value}T{heure_field.value}:00",
+                "date_inhumation": date_reelle_field.value,      # ✅ juste la date : "2026-07-29"
+                "heure_inhumation": heure_field.value,            # ✅ l'heure séparément : "14:30"
                 "observations": observations_field.value.strip()
             }
             auth.api.put(f"/reservations/{reservation_id}/confirmer-inhumation", json=payload)
-            
-            sb = ft.SnackBar(
+
+            show_overlay(page, ft.SnackBar(
                 content=ft.Text("✅ Inhumation confirmée avec succès. Caveau marqué comme occupé.", color=Colors.TEXT_ON_DARK),
                 bgcolor="#496042"
-            )
-            page.snack_bar = sb
-            sb.open = True
+            ))
+            loading.visible = False
             page.update()
-            
-            import asyncio
+
             async def redirect():
                 await asyncio.sleep(1.5)
                 page.go("/inhumations")
             page.run_task(redirect)
-            
+
         except ApiError as exc:
-            loading.visible = False
-            error_text.value = f"❌ Échec : {exc.message}"
-            error_text.visible = True
-            page.update()
+            # ✅ CORRECTION : message backend traduit en français
+            show_error(f"❌ Échec : {_friendly_error(exc)}")
+        except Exception:
+            show_error("❌ Une erreur inattendue est survenue. Veuillez réessayer.")
 
     load_reservation()
 
