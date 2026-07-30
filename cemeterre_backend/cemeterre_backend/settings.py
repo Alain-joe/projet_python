@@ -3,6 +3,7 @@ Django settings for cemeterre_backend project.
 Compatible Django 6.0.x + PostGIS + Sécurisation par .env + Optimisé pour Render
 """
 import os
+import platform
 from pathlib import Path
 from dotenv import load_dotenv
 
