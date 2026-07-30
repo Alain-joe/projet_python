@@ -115,7 +115,7 @@ def login_step1(request, data: LoginStep1Schema):
         except Exception as e:
             print(f"ERREUR EMAIL MFA: {e}")
 
-    threading.Thread(target=send_email_async, daemon=True).start()
+    send_email_async()
 
     return {"message": "Code MFA envoyé par email", "user_id": user.id}
 
