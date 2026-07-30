@@ -110,10 +110,10 @@ def login_step1(request, data: LoginStep1Schema):
                 message=f"Votre code MFA est : {code}\nIl expire dans 10 minutes.",
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[user.email],
-                fail_silently=True,
-            )
-        except Exception:
-            pass
+                fail_silently=False,
+)
+        except Exception as e:
+            print(f"ERREUR EMAIL MFA: {e}")
 
     threading.Thread(target=send_email_async, daemon=True).start()
 
