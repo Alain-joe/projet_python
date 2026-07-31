@@ -8,6 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgdal-dev \
     libgeos-dev \
     gcc \
+    ca-certificates \
+    && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Variables pour que Django trouve GDAL sur Linux (chemins standards Debian)
