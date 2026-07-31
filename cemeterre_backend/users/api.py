@@ -2,15 +2,14 @@
 users/api.py — Endpoints pour la gestion des utilisateurs.
 Compatible Django Ninja + JWT.
 CORRECTION : Les champs address et city existent désormais dans le modèle.
+CORRECTION : Utilisation de Brevo pour tous les envois d'emails (MFA + identifiants).
 """
 from ninja import Router
 from ninja.errors import HttpError
 from ninja_jwt.authentication import JWTAuth
 from ninja_jwt.tokens import RefreshToken
-from django.core.mail import send_mail
-from django.conf import settings
+from users.services.email_service import send_mfa_email, send_credentials_email_brevo
 from django.shortcuts import get_object_or_404
-import threading
 import unicodedata
 import re
 import random
@@ -59,26 +58,16 @@ def generate_temporary_password(length=10):
 
 
 def send_credentials_email(user: User, password: str):
-    def _send():
-        try:
-            send_mail(
-                subject="Vos identifiants Cimetière Connect",
-                message=(
-                    f"Bonjour {user.first_name},\n\n"
-                    f"Votre compte a été créé par l'administrateur.\n\n"
-                    f"Identifiants de connexion :\n"
-                    f"- Nom d'utilisateur : {user.username}\n"
-                    f"- Mot de passe : {password}\n\n"
-                    f"Vous devrez changer votre mot de passe lors de votre première connexion.\n\n"
-                    f"Cordialement,\nL'équipe Cimetière Connect"
-                ),
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                fail_silently=True,
-            )
-        except Exception:
-            pass
-    threading.Thread(target=_send, daemon=True).start()
+    """Envoie les identifiants par email via Brevo."""
+    try:
+        send_credentials_email_brevo(
+            email=user.email,
+            prenom=user.first_name,
+            username=user.username,
+            password=password,
+        )
+    except Exception as e:
+        print(f"⚠️ ERREUR BREVO IDENTIFIANTS: {e}")
 
 
 # ==============================================================================
@@ -103,19 +92,10 @@ def login_step1(request, data: LoginStep1Schema):
 
     code = user.generate_mfa_code()
 
-    def send_email_async():
-        try:
-            send_mail(
-                subject="Votre code de connexion",
-                message=f"Votre code MFA est : {code}\nIl expire dans 10 minutes.",
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                fail_silently=False,
-            )
-        except Exception as e:
-            print(f"ERREUR EMAIL MFA: {e}")
+    success = send_mfa_email(user.email, code)
 
-    send_email_async()
+    if not success:
+        return {"error": "Impossible d'envoyer le code MFA. Veuillez réessayer."}
 
     return {"message": "Code MFA envoyé par email", "user_id": user.id}
 
@@ -178,23 +158,20 @@ def generate_username_endpoint(request, data: GenerateUsernameSchema):
 @router.post("/create-internal/")
 @require_role("admin", "secretariat")
 def create_internal_user(request, data: CreateInternalUserSchema):
-    # ✅ VÉRIFICATIONS D'UNICITÉ
     if User.objects.filter(email=data.email).exists():
         raise HttpError(400, "Cet email est déjà utilisé par un autre compte.")
-    
+
     if data.username and User.objects.filter(username=data.username).exists():
         raise HttpError(400, f"Le nom d'utilisateur '{data.username}' est déjà pris.")
-    
+
     if data.phone and User.objects.filter(phone=data.phone).exists():
         raise HttpError(400, "Ce numéro de téléphone est déjà enregistré.")
 
-    # ✅ GÉNÉRATION DU USERNAME SI NON FOURNI
     if data.username:
         username = data.username
     else:
         username = generate_unique_username(data.first_name, data.last_name)
 
-    # ✅ GÉNÉRATION DU MOT DE PASSE TEMPORAIRE SI NON FOURNI
     password = data.password
     must_change_pwd = True
 
@@ -203,7 +180,6 @@ def create_internal_user(request, data: CreateInternalUserSchema):
     else:
         must_change_pwd = False
 
-    # ✅ CRÉATION DE L'UTILISATEUR
     user = User.objects.create_user(
         username=username,
         email=data.email,
@@ -220,10 +196,8 @@ def create_internal_user(request, data: CreateInternalUserSchema):
         must_change_password=must_change_pwd,
     )
 
-    # ✅ ENVOI DES IDENTIFIANTS PAR EMAIL
     send_credentials_email(user, password)
 
-    # ✅ NOTIFICATION AUX ADMINS/SECRÉTARIAT
     try:
         notifier_nouvel_utilisateur(user, cree_par=request.auth)
     except Exception as e:
@@ -258,7 +232,6 @@ def list_users(request):
             "is_approved": u.is_approved,
             "created_at": u.created_at.isoformat() if u.created_at else None,
             "date_joined": u.date_joined.isoformat() if u.date_joined else None,
-            # ✅ CORRECTION : Les champs existent maintenant dans le modèle
             "address": u.address or "",
             "city": u.city or "",
         })
@@ -267,7 +240,6 @@ def list_users(request):
 
 @router.get("/{user_id}/", response=UserOut)
 def get_user(request, user_id: int):
-    # ✅ Un utilisateur peut toujours consulter son propre profil.
     if request.auth.id != user_id and request.auth.role not in ("admin", "secretariat"):
         raise HttpError(403, "Accès refusé.")
 
@@ -286,7 +258,6 @@ def get_user(request, user_id: int):
         "is_approved": user.is_approved,
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "date_joined": user.date_joined.isoformat() if user.date_joined else None,
-        # ✅ CORRECTION : Les champs existent maintenant dans le modèle
         "address": user.address or "",
         "city": user.city or "",
     }
@@ -300,14 +271,12 @@ def update_user(request, user_id: int, data: UserUpdateSchema):
     if user.id == request.auth.id and data.is_active is False:
         raise HttpError(400, "Vous ne pouvez pas désactiver votre propre compte.")
 
-    # ✅ VÉRIFICATIONS D'UNICITÉ POUR LES CHAMPS MODIFIÉS
     if data.email and User.objects.filter(email=data.email).exclude(id=user_id).exists():
         raise HttpError(400, "Cet email est déjà utilisé par un autre compte.")
-    
+
     if data.phone and User.objects.filter(phone=data.phone).exclude(id=user_id).exists():
         raise HttpError(400, "Ce numéro de téléphone est déjà enregistré.")
 
-    # ✅ MISE À JOUR DES CHAMPS
     if data.first_name is not None:
         user.first_name = data.first_name
     if data.last_name is not None:
@@ -326,7 +295,6 @@ def update_user(request, user_id: int, data: UserUpdateSchema):
         user.is_active = data.is_active
     if data.is_approved is not None:
         user.is_approved = data.is_approved
-    # ✅ CORRECTION : Mise à jour sécurisée des nouveaux champs
     if data.address is not None:
         user.address = data.address
     if data.city is not None:

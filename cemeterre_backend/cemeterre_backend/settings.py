@@ -7,12 +7,15 @@ import platform
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Charger les variables d'environnement depuis le fichier .env
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env')
 
-GDAL_LIBRARY_PATH = os.getenv("GDAL_LIBRARY_PATH")
-GEOS_LIBRARY_PATH = os.getenv("GEOS_LIBRARY_PATH")
+
+if platform.system() == "Windows":
+    GDAL_LIBRARY_PATH = os.getenv("GDAL_LIBRARY_PATH")
+    GEOS_LIBRARY_PATH = os.getenv("GEOS_LIBRARY_PATH")
+# Sur Linux (Docker/Render), Django lit GDAL_LIBRARY_PATH depuis
+# la variable d'environnement du conteneur (définie dans le Dockerfile)
 
 # ==============================================================================
 # SÉCURITÉ
@@ -109,7 +112,7 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
-# ==============================================================================
+# =============================================================================
 # MODÈLE UTILISATEUR PERSONNALISÉ
 # ==============================================================================
 AUTH_USER_MODEL = 'users.User'
