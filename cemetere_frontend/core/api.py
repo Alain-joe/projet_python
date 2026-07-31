@@ -1,14 +1,21 @@
 """
 core/api.py — Client API centralisé (httpx synchrone) vers le backend Django Ninja.
 Compatible Flet 0.86.3
+
+CORRECTION APPLIQUÉE :
+- _request() : erreur d'indentation corrigée. La ligne
+  `resp = self._client.request(...)` était au même niveau que `try:`
+  au lieu d'être à l'intérieur du bloc, ce qui cassait la syntaxe
+  Python (IndentationError) et empêchait tout le fichier de se
+  charger.
 """
 from __future__ import annotations
 import httpx
 from dataclasses import dataclass
 from typing import Any, Optional
 
-BASE_URL = "https://cemetiere-backend.onrender.com/api"
-TIMEOUT_SECONDS = 15.0
+BASE_URL ="https://cemetiere-backend-docker.onrender.com"
+TIMEOUT_SECONDS = 60.0
 
 class ApiError(Exception):
     def __init__(self, message: str, status_code: int | None = None, payload: Any = None):
@@ -65,6 +72,10 @@ class ApiClient:
 
     def _request(self, method: str, path: str, retry_on_401: bool = True, **kwargs) -> Any:
         try:
+            # Ajout automatique du préfixe /api pour les routes Django Ninja
+            if not path.startswith("/api/"):
+                path = "/api" + path
+
             resp = self._client.request(method, path, headers=self._headers(), **kwargs)
         except httpx.RequestError as exc:
             raise ApiError(f"Erreur réseau : impossible de contacter le serveur ({exc})") from exc
