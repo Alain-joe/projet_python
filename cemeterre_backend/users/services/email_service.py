@@ -1,4 +1,5 @@
 import os
+import traceback
 import sib_api_v3_sdk
 from sib_api_v3_sdk.rest import ApiException
 
@@ -37,7 +38,11 @@ def send_mfa_email(email, code):
         print("EMAIL MFA ENVOYE PAR BREVO")
         return True
     except ApiException as e:
-        print(f"ERREUR BREVO MFA : {e}")
+        print(f"ERREUR BREVO MFA (ApiException) : {e}")
+        return False
+    except Exception as e:
+        print(f"ERREUR BREVO MFA (AUTRE EXCEPTION) : {type(e).__name__}: {e}")
+        traceback.print_exc()
         return False
 
 
@@ -70,5 +75,9 @@ def send_credentials_email_brevo(email, prenom, username, password):
         print("EMAIL IDENTIFIANTS ENVOYE PAR BREVO")
         return True
     except ApiException as e:
-        print(f"ERREUR BREVO IDENTIFIANTS : {e}")
+        print(f"ERREUR BREVO IDENTIFIANTS (ApiException) : {e}")
+        return False
+    except Exception as e:
+        print(f"ERREUR BREVO IDENTIFIANTS (AUTRE EXCEPTION) : {type(e).__name__}: {e}")
+        traceback.print_exc()
         return False
