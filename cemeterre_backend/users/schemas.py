@@ -97,6 +97,9 @@ class LoginStep2Schema(Schema):
     user_id: int
     code: str
 
+class RefreshTokenSchema(Schema):
+    refresh: str
+
 
 # ==============================================================================
 # SCHÉMAS D'INSCRIPTION (Client)

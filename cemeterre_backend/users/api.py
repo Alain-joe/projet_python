@@ -3,11 +3,17 @@ users/api.py — Endpoints pour la gestion des utilisateurs.
 Compatible Django Ninja + JWT.
 CORRECTION : Les champs address et city existent désormais dans le modèle.
 CORRECTION : Utilisation de Brevo pour tous les envois d'emails (MFA + identifiants).
+CORRECTION : Ajout de POST /token/refresh/ — cette route était appelée
+par core/api.py (frontend) pour rafraîchir le token d'accès expiré,
+mais n'existait jamais côté backend -> tout token expiré déclenchait
+un 404 sur le refresh, donc une déconnexion forcée systématique
+("Session expirée") même si le refresh token était encore valide.
 """
 from ninja import Router
 from ninja.errors import HttpError
 from ninja_jwt.authentication import JWTAuth
 from ninja_jwt.tokens import RefreshToken
+from ninja_jwt.exceptions import TokenError
 from users.services.email_service import send_mfa_email, send_credentials_email_brevo
 from django.shortcuts import get_object_or_404
 import unicodedata
@@ -19,6 +25,7 @@ from .models import User
 from .schemas import (
     LoginStep1Schema,
     LoginStep2Schema,
+    RefreshTokenSchema,
     RegisterSchema,
     CreateInternalUserSchema,
     UserOut,
@@ -120,6 +127,20 @@ def login_step2(request, data: LoginStep2Schema):
         "first_name": user.first_name,
         "last_name": user.last_name,
     }
+
+
+@router.post("/token/refresh/", auth=None)
+def refresh_access_token(request, data: RefreshTokenSchema):
+    """
+    Rafraîchit le token d'accès à partir du refresh token.
+    Appelé automatiquement par le frontend (core/api.py) quand un
+    appel API reçoit un 401 (token d'accès expiré).
+    """
+    try:
+        refresh = RefreshToken(data.refresh)
+        return {"access": str(refresh.access_token)}
+    except TokenError:
+        raise HttpError(401, "Refresh token invalide ou expiré. Veuillez vous reconnecter.")
 
 
 @router.post("/register/", auth=None)
