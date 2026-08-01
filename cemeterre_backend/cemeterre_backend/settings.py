@@ -171,3 +171,8 @@ AIRTEL_ENVIRONMENT = os.getenv('AIRTEL_ENVIRONMENT', 'sandbox')
 # ==============================================================================
 # Permet à Django de reconnaître les connexions HTTPS derrière le proxy de Render
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+# ==============================================================================
+# BREVO (envoi transactionnel via API — MFA + identifiants)
+# ==============================================================================
+BREVO_API_KEY = os.getenv('BREVO_API_KEY', '')
+BREVO_SENDER_EMAIL = os.getenv('BREVO_SENDER_EMAIL', '')
