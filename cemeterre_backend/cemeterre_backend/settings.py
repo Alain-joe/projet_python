@@ -5,6 +5,7 @@ Compatible Django 6.0.x + PostGIS + Sécurisation par .env + Optimisé pour Rend
 import os
 import platform
 from pathlib import Path
+from datetime import timedelta
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -171,8 +172,22 @@ AIRTEL_ENVIRONMENT = os.getenv('AIRTEL_ENVIRONMENT', 'sandbox')
 # ==============================================================================
 # Permet à Django de reconnaître les connexions HTTPS derrière le proxy de Render
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 # ==============================================================================
 # BREVO (envoi transactionnel via API — MFA + identifiants)
 # ==============================================================================
 BREVO_API_KEY = os.getenv('BREVO_API_KEY', '')
 BREVO_SENDER_EMAIL = os.getenv('BREVO_SENDER_EMAIL', '')
+
+# ==============================================================================
+# NINJA JWT (durée de vie des tokens)
+# ==============================================================================
+# ACCESS_TOKEN_LIFETIME allongé à 30 min (défaut ninja_jwt : 5 min) pour
+# éviter les déconnexions prématurées sur les formulaires longs (ex:
+# configuration du cimetière). Combiné avec l'endpoint /users/token/refresh/
+# désormais fonctionnel, qui prolonge la session tant que le refresh
+# token (7 jours) reste valide.
+NINJA_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+}
