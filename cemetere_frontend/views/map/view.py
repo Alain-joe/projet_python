@@ -2,18 +2,23 @@
 views/map/view.py — Carte interactive du cimetière.
 Compatible Flet 0.86.3
 CORRECTION : Utilisation d'une fonction async pour appeler page.launch_url() correctement.
+CORRECTION : Remplacement de 127.0.0.1 par le domaine public du backend Render
+(127.0.0.1 ne fonctionne qu'en local — une fois hébergé, chaque navigateur
+distant a son propre 127.0.0.1 qui ne pointe vers rien).
 """
 from __future__ import annotations
 import flet as ft
 from core.auth import AuthState
 from core.theme import Colors, get_device_type, heading_style
 
-def build_map_view(page: ft.Page, auth: AuthState) -> ft.View:
-    # Récupérer le token pour l'authentification de la carte
-    token = auth.access_token or ""
-    map_url = f"http://127.0.0.1:8000/map/?token={token}"
+# ✅ URL publique du backend Django hébergé sur Render
+BACKEND_URL = "https://cemetiere-backend-docker.onrender.com"
 
-    # ✅ CORRECTION : Fonction asynchrone pour appeler launch_url correctement
+
+def build_map_view(page: ft.Page, auth: AuthState) -> ft.View:
+    token = auth.access_token or ""
+    map_url = f"{BACKEND_URL}/map/?token={token}"
+
     async def open_map_in_browser(e):
         await page.launch_url(map_url)
 
@@ -48,7 +53,7 @@ def build_map_view(page: ft.Page, auth: AuthState) -> ft.View:
                         style=ft.ButtonStyle(bgcolor=Colors.PRIMARY),
                         width=320,
                         height=50,
-                        on_click=open_map_in_browser,  # ✅ Appel de la fonction async
+                        on_click=open_map_in_browser,
                     ),
                     ft.Container(height=16),
                     ft.Text(
