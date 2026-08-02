@@ -5,6 +5,12 @@ Compatible Flet 0.86.0
 CORRECTION APPLIQUÉE :
 - Détection de largeur de fenêtre sécurisée (page.width seul pouvait
   être None/obsolète) -> même pattern robuste que les autres vues.
+- ✅ NOUVELLE CORRECTION : "/reservations/mine/" -> "/reservations/mine"
+  (sans slash final). La route backend est déclarée sans slash final
+  (@router.get("/mine")) ; avec le slash, Django Ninja essayait de faire
+  correspondre "mine" au pattern dynamique /{reservation_id}/ et tentait
+  de le convertir en entier, d'où l'erreur "Input should be a valid
+  integer, unable to parse string as an integer".
 """
 from __future__ import annotations
 import flet as ft
@@ -53,7 +59,8 @@ def build_client_dashboard_view(page: ft.Page, auth: AuthState) -> ft.View:
         loading.visible, error_text.visible = True, False
         page.update()
         try:
-            my_res = auth.api.get("/reservations/mine/")
+            # ✅ CORRECTION : slash final retiré, la route backend est "/mine" sans "/"
+            my_res = auth.api.get("/reservations/mine")
             my_inv = auth.api.get("/finance/factures/mine")
 
             reservations = my_res if isinstance(my_res, list) else my_res.get("results", [])
