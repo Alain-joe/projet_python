@@ -90,8 +90,9 @@
         if (token) log(`2. Token trouvé : OUI`, "success");
         else log("2. Token trouvé : NON", "error");
 
-        const API_BASE = "http://127.0.0.1:8000";
-        const FLET_APP_URL = "http://127.0.0.1:8550";
+        // ✅ CORRECTION : domaines publics Render au lieu de 127.0.0.1
+        const API_BASE = "https://cemetiere-backend-docker.onrender.com";
+        const FLET_APP_URL = "https://projet-python-hv7x.onrender.com";
         
         const map = L.map('map').setView([-4.7878, 11.8750], 13);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { 
@@ -102,7 +103,6 @@
         const statusColors = { 'available': '#496042', 'reserved': '#8B6B3F', 'occupied': '#8A4343', 'non_exploitable': '#8B8B8B' };
         const statusLabels = { 'available': 'Disponible', 'reserved': 'Réservé', 'occupied': 'Occupé', 'non_exploitable': 'Non exploitable' };
 
-        // 1. Récupérer la config et dessiner le rectangle de délimitation
         const configUrl = token ? `${API_BASE}/api/cemetery/config/?token=${token}` : `${API_BASE}/api/cemetery/config/`;
         fetch(configUrl, { headers: token ? { "Authorization": "Bearer " + token } : {} })
             .then(async res => {
@@ -113,7 +113,6 @@
                 log(`4. Config reçue: ${cemetery.city || 'N/A'}`, "success");
                 log(`   -> Cimetière: Lat=${cemetery.latitude}, Lng=${cemetery.longitude}`, "warn");
                 
-                // ✅ RESTAURATION DU RECTANGLE DE DÉLIMITATION
                 if (cemetery.bounds) {
                     const bounds = [
                         [cemetery.bounds.south, cemetery.bounds.west],
@@ -126,8 +125,6 @@
                         `<b>${cemetery.name}</b><br>Ville: ${cemetery.city}<br>Superficie: ${cemetery.total_area} m²`
                     );
                     log("   -> Rectangle de délimitation dessiné ✅", "success");
-                    
-                    // Centrer la carte sur le cimetière (pas sur les caveaux)
                     map.fitBounds(bounds, { padding: [50, 50] });
                 } else if (cemetery.latitude && cemetery.longitude) {
                     map.setView([cemetery.latitude, cemetery.longitude], 16);
@@ -135,7 +132,6 @@
             })
             .catch(err => log(`4. ÉCHEC config: ${err.message}`, "error"));
 
-        // 2. Récupérer les caveaux
         const gravesUrl = token ? `${API_BASE}/api/cemetery/graves-geojson/?token=${token}` : `${API_BASE}/api/cemetery/graves-geojson/`;
         fetch(gravesUrl, { headers: token ? { "Authorization": "Bearer " + token } : {} })
             .then(async res => {
@@ -148,13 +144,10 @@
 
                 if (features.length > 0) {
                     let addedCount = 0;
-                    
-                    // ✅ DIAGNOSTIC : Afficher les coordonnées du 1er caveau
                     const firstCoords = features[0].geometry.coordinates;
                     log(`   -> 1er caveau: Lat=${firstCoords[1]}, Lng=${firstCoords[0]}`, "warn");
                     
-                    // Calculer la distance approximative entre le cimetière et les caveaux
-                    const cemeteryLat = -4.795; // Valeur par défaut, sera mise à jour
+                    const cemeteryLat = -4.795;
                     const caveauxLat = firstCoords[1];
                     const distanceKm = Math.abs(cemeteryLat - caveauxLat) * 111;
                     log(`   -> Distance cimetière/caveaux: ~${distanceKm.toFixed(2)} km`, distanceKm > 0.5 ? "error" : "success");
@@ -197,7 +190,6 @@
 
                     if (addedCount > 0) {
                         log(`5. FIN: ${addedCount} marqueurs ajoutés avec boutons !`, "success");
-                        log("   -> Les caveaux sont groupés mais peut-être hors du cimetière.", "warn");
                     }
                 }
                 document.getElementById('loading').style.display = 'none';
