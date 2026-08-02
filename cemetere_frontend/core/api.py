@@ -2,12 +2,18 @@
 core/api.py — Client API centralisé (httpx synchrone) vers le backend Django Ninja.
 Compatible Flet 0.86.3
 
-CORRECTION APPLIQUÉE :
-- _request() : erreur d'indentation corrigée. La ligne
-  `resp = self._client.request(...)` était au même niveau que `try:`
-  au lieu d'être à l'intérieur du bloc, ce qui cassait la syntaxe
-  Python (IndentationError) et empêchait tout le fichier de se
-  charger.
+CORRECTIONS APPLIQUÉES :
+- _request() : erreur d'indentation corrigée.
+- Endpoints déplacée AVANT ApiClient (elle était après, donc
+  inutilisable depuis les méthodes de ApiClient).
+- Ajout de get_reservations_mine(), get_exhumations_mine(),
+  get_concessions_mine() directement sur ApiClient : ces méthodes
+  n'existaient que sur ApiService, mais auth.api (dans core/auth.py)
+  est une instance de ApiClient -> tout appel à
+  auth.api.get_reservations_mine() ou auth.api.get_exhumations_mine()
+  (utilisés dans views/reservations/client_list.py et
+  views/exhumations/client_exhumations.py) plantait avec
+  AttributeError.
 """
 from __future__ import annotations
 import httpx
@@ -44,6 +50,67 @@ class TokenProvider:
     def on_auth_expired(self) -> None:
         self.access_token = None
         self.refresh_token = None
+
+
+class Endpoints:
+    LOGIN = "/users/login/"
+    MFA_VERIFY = "/users/login/verify/"
+    USERS_LIST = "/users/list"
+    USER_DETAIL = "/users/{user_id}/"
+    CREATE_INTERNAL_USER = "/users/create-internal/"
+    USER_APPROVE = "/users/{user_id}/approve/"
+    USER_REJECT = "/users/{user_id}/reject/"
+
+    CEMETERY_CONFIG = "/cemetery/config/"
+    CEMETERY_INITIALIZE_COMPLETE = "/cemetery/cemeteries/initialize-complete/"
+    GRAVES_MAP = "/cemetery/graves-map/"
+    GRAVES = "/cemetery/graves"
+    SECTIONS_GEOJSON = "/cemetery/sections/geojson/"
+    ALLEES_GEOJSON = "/cemetery/allees/geojson/"
+
+    # ✅ Routes spécifiques Client
+    RESERVATIONS_MINE = "/reservations/mine"
+    EXHUMATIONS_MINE = "/cemetery/exhumations/mine"
+    CONCESSIONS_MINE = "/cemetery/concessions/mine"
+
+    RESERVATIONS_LIST = "/reservations/"
+    RESERVATION_MANUAL = "/reservations/manual/"
+
+    @staticmethod
+    def reservation_details(reservation_id: int) -> str:
+        return f"/reservations/{reservation_id}/"
+        
+    @staticmethod
+    def reservation_update(reservation_id: int) -> str:
+        return f"/reservations/{reservation_id}/"
+
+    FACTURES = "/finance/factures"
+    FINANCE_STATS = "/finance/stats/"
+    DASHBOARD_STATS = "/reports/dashboard/"
+    
+    CONCESSIONS = "/cemetery/concessions"
+    CONCESSIONS_READY = "/cemetery/concessions/ready-for-creation"
+    CONCESSIONS_FROM_RESERVATION = "/cemetery/concessions/from-reservation"
+    
+    @staticmethod
+    def concession_renew(concession_id: int) -> str:
+        return f"/cemetery/concessions/{concession_id}/renew"
+        
+    @staticmethod
+    def concession_resilier(concession_id: int) -> str:
+        return f"/cemetery/concessions/{concession_id}/resilier"
+
+    EXHUMATIONS = "/cemetery/exhumations"
+    AUDIT_LOGS = "/audit/logs"
+
+    NOTIFICATIONS_LIST = "/notifications/notifications"
+    NOTIFICATIONS_UNREAD_COUNT = "/notifications/notifications/unread-count"
+    NOTIFICATIONS_READ_ALL = "/notifications/notifications/read-all"
+
+    @staticmethod
+    def notification_read(notification_id: int) -> str:
+        return f"/notifications/notifications/{notification_id}/read"
+
 
 class ApiClient:
     def __init__(self, token_provider: TokenProvider, base_url: str = BASE_URL):
@@ -124,6 +191,18 @@ class ApiClient:
     def close(self) -> None:
         self._client.close()
 
+    # ✅ Méthodes spécifiques Client (manquaient — utilisées par
+    # views/reservations/client_list.py et
+    # views/exhumations/client_exhumations.py)
+    def get_reservations_mine(self) -> Any:
+        return self.get(Endpoints.RESERVATIONS_MINE)
+
+    def get_exhumations_mine(self) -> Any:
+        return self.get(Endpoints.EXHUMATIONS_MINE)
+
+    def get_concessions_mine(self) -> Any:
+        return self.get(Endpoints.CONCESSIONS_MINE)
+
     # Méthodes de paiement
     def payer_especes(self, facture_id: int, montant: float, reference: str = ""):
         return self.post(f"/finance/factures/{facture_id}/paiement/especes/", json={"montant": montant, "reference": reference})
@@ -164,66 +243,6 @@ class ApiClient:
 
     def rejeter_signalement(self, signalement_id: int, motif_rejet: str):
         return self.post(f"/cemetery/graves/signalements/{signalement_id}/rejeter/", json={"motif_rejet": motif_rejet})
-
-
-class Endpoints:
-    LOGIN = "/users/login/"
-    MFA_VERIFY = "/users/login/verify/"
-    USERS_LIST = "/users/list"
-    USER_DETAIL = "/users/{user_id}/"
-    CREATE_INTERNAL_USER = "/users/create-internal/"
-    USER_APPROVE = "/users/{user_id}/approve/"
-    USER_REJECT = "/users/{user_id}/reject/"
-
-    CEMETERY_CONFIG = "/cemetery/config/"
-    CEMETERY_INITIALIZE_COMPLETE = "/cemetery/cemeteries/initialize-complete/"
-    GRAVES_MAP = "/cemetery/graves-map/"
-    GRAVES = "/cemetery/graves"
-    SECTIONS_GEOJSON = "/cemetery/sections/geojson/"
-    ALLEES_GEOJSON = "/cemetery/allees/geojson/"
-
-    # ✅ Routes spécifiques Client
-    RESERVATIONS_MINE = "/reservations/mine"
-    EXHUMATIONS_MINE = "/cemetery/exhumations/mine"
-    CONCESSIONS_MINE = "/cemetery/concessions/mine"
-
-    RESERVATIONS_LIST = "/reservations/"
-    RESERVATION_MANUAL = "/reservations/manual/"
-
-    @staticmethod
-    def reservation_details(reservation_id: int) -> str:
-        return f"/reservations/{reservation_id}/"
-        
-    @staticmethod
-    def reservation_update(reservation_id: int) -> str:
-        return f"/reservations/{reservation_id}/"
-
-    FACTURES = "/finance/factures"
-    FINANCE_STATS = "/finance/stats/"
-    DASHBOARD_STATS = "/reports/dashboard/"
-    
-    CONCESSIONS = "/cemetery/concessions"
-    CONCESSIONS_READY = "/cemetery/concessions/ready-for-creation"
-    CONCESSIONS_FROM_RESERVATION = "/cemetery/concessions/from-reservation"
-    
-    @staticmethod
-    def concession_renew(concession_id: int) -> str:
-        return f"/cemetery/concessions/{concession_id}/renew"
-        
-    @staticmethod
-    def concession_resilier(concession_id: int) -> str:
-        return f"/cemetery/concessions/{concession_id}/resilier"
-
-    EXHUMATIONS = "/cemetery/exhumations"
-    AUDIT_LOGS = "/audit/logs"
-
-    NOTIFICATIONS_LIST = "/notifications/notifications"
-    NOTIFICATIONS_UNREAD_COUNT = "/notifications/notifications/unread-count"
-    NOTIFICATIONS_READ_ALL = "/notifications/notifications/read-all"
-
-    @staticmethod
-    def notification_read(notification_id: int) -> str:
-        return f"/notifications/notifications/{notification_id}/read"
 
 
 class ApiService:
