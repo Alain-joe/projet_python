@@ -5,16 +5,17 @@ Compatible Flet 0.86.3
 CORRECTIONS APPLIQUÉES :
 - Entrées spécifiques pour le rôle CLIENT (déjà présent).
 - Détection de largeur centralisée et sécurisée (déjà présent).
-- ✅ NOUVEAU : suppression totale de la tentative page.open()/page.close()
-  pour le NavigationDrawer. Contrairement au DatePicker/TimePicker (où
-  page.open() lève une AttributeError franche, détectable), page.open()
-  peut très bien exister et ne lever AUCUNE exception pour un
-  NavigationDrawer tout en ne l'affichant pas correctement -> le
-  try/except restait alors bloqué en silence, sans jamais tomber sur le
-  repli. On utilise désormais UNIQUEMENT l'assignation directe
-  (page.drawer + drawer.open = True/False + page.update()), méthode
-  connue pour fonctionner de façon fiable sur cette build.
-- Container mélangé dans le drawer retiré (décalait selected_index).
+- Suppression totale de la tentative page.open()/page.close() pour le
+  NavigationDrawer — assignation directe uniquement (déjà présent).
+- Container mélangé dans le drawer retiré (déjà présent).
+- ✅ BUG RACINE TROUVÉ ET CORRIGÉ : build_app_bar() faisait
+  page.drawer = drawer, mais core/router.py construit ensuite une
+  NOUVELLE ft.View sans jamais lui passer ce tiroir via son propre
+  paramètre drawer=. Sur cette build de Flet, le tiroir doit être
+  attaché explicitement à la View rendue, page.drawer seul ne suffit
+  pas. build_app_bar() retourne maintenant un tuple (appbar, drawer),
+  et build_navigation() l'expose dans le dict retourné sous la clé
+  "drawer", pour que router.py puisse l'attacher à la View.
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -78,18 +79,15 @@ def _go(page: ft.Page, route: str) -> None:
 
 
 def _open_drawer(page: ft.Page, drawer: ft.NavigationDrawer) -> None:
-    """
-    ✅ FIX : plus de tentative page.open() — assignation directe
-    uniquement, seule méthode fiable observée sur cette build de Flet
-    pour un NavigationDrawer.
-    """
+    """Assignation directe uniquement — seule méthode fiable observée sur
+    cette build de Flet pour un NavigationDrawer."""
     page.drawer = drawer
     drawer.open = True
     page.update()
 
 
 def _close_drawer(page: ft.Page, drawer: ft.NavigationDrawer) -> None:
-    """✅ FIX : symétrique de _open_drawer, assignation directe uniquement."""
+    """Symétrique de _open_drawer, assignation directe uniquement."""
     drawer.open = False
     page.update()
 
@@ -163,7 +161,13 @@ def side_rail(page: ft.Page, auth: AuthState, unread_count: int = 0) -> ft.Contr
     )
 
 
-def build_app_bar(page: ft.Page, auth: AuthState, unread_count: int = 0) -> ft.AppBar:
+def build_app_bar(page: ft.Page, auth: AuthState, unread_count: int = 0) -> tuple[ft.AppBar, ft.NavigationDrawer]:
+    """
+    Retourne (appbar, drawer). Le drawer doit être attaché explicitement
+    au paramètre drawer= de la ft.View par l'appelant (core/router.py) —
+    page.drawer seul ne suffit pas sur cette build de Flet, c'est ce qui
+    empêchait le tiroir de s'ouvrir malgré un _open_drawer() correct.
+    """
     items = _visible_items(auth)
 
     drawer = ft.NavigationDrawer(
@@ -179,7 +183,6 @@ def build_app_bar(page: ft.Page, auth: AuthState, unread_count: int = 0) -> ft.A
             _close_drawer(page, drawer)
 
     drawer.on_change = on_drawer_change
-    page.drawer = drawer
 
     bell_icon = ft.Icons.NOTIFICATIONS_ACTIVE if unread_count > 0 else ft.Icons.NOTIFICATIONS
 
@@ -200,7 +203,7 @@ def build_app_bar(page: ft.Page, auth: AuthState, unread_count: int = 0) -> ft.A
         ]
     )
 
-    return ft.AppBar(
+    appbar = ft.AppBar(
         title=ft.Text("Cimetière Connect", weight=ft.FontWeight.W_700, color=Colors.PRIMARY),
         bgcolor="#FFFFFF",
         leading=ft.IconButton(ft.Icons.MENU, on_click=lambda _: _open_drawer(page, drawer)),
@@ -209,6 +212,8 @@ def build_app_bar(page: ft.Page, auth: AuthState, unread_count: int = 0) -> ft.A
             ft.IconButton(ft.Icons.LOGOUT, tooltip="Se déconnecter", on_click=lambda _: (auth.logout(), page.go("/login"))),
         ],
     )
+
+    return appbar, drawer
 
 
 def build_navigation(page: ft.Page, auth: AuthState) -> dict:
@@ -223,5 +228,6 @@ def build_navigation(page: ft.Page, auth: AuthState) -> dict:
     device = get_device_type(get_page_width(page))
 
     if device == "mobile":
-        return {"appbar": build_app_bar(page, auth, unread_count), "rail": None}
-    return {"appbar": None, "rail": side_rail(page, auth, unread_count)}
+        appbar, drawer = build_app_bar(page, auth, unread_count)
+        return {"appbar": appbar, "rail": None, "drawer": drawer}
+    return {"appbar": None, "rail": side_rail(page, auth, unread_count), "drawer": None}

@@ -1,15 +1,17 @@
 """
 core/router.py — Navigation par rôle (RBAC) avec dispatchers.
 Compatible Flet 0.86.3
-CORRECTION : Suppression de la route /cimetiere/alleys (dessin d'allées abandonné
-au profit d'une configuration standard en une seule étape).
-CORRECTION CRITIQUE : _on_resize plantait avec
-"TypeError: RouteChangeEvent.__init__() missing 2 required positional
-arguments: 'name' and 'control'" — cette version de Flet exige ces deux
-arguments en plus de 'route'. Correctif : la logique de rendu de route est
-extraite dans _render_route(path), qui ne nécessite aucun objet Event.
-_on_route_change et _on_resize appellent tous les deux cette méthode
-commune, évitant de construire un RouteChangeEvent factice.
+
+CORRECTIONS APPLIQUÉES (déjà présentes) :
+- Suppression de la route /cimetiere/alleys.
+- _on_resize n'utilise plus un RouteChangeEvent factice.
+
+✅ NOUVELLE CORRECTION : _build_view_with_navigation() ne passait jamais
+le NavigationDrawer construit par build_navigation() à la ft.View
+retournée — page.drawer seul (assigné dans navigation.py) ne suffit pas
+sur cette build de Flet pour que le tiroir s'ouvre. Le dict renvoyé par
+build_navigation() expose désormais aussi "drawer", attaché ici via le
+paramètre drawer= de ft.View.
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -35,8 +37,6 @@ class Router:
         self.auth = auth
         self._routes: dict[str, Route] = {}
         self.page.on_route_change = self._on_route_change
-        # ✅ Redéclenche le rendu de la route courante quand la taille réelle
-        # de la fenêtre/viewport est connue (corrige le mode mobile).
         self.page.on_resize = self._on_resize
 
     def register(self, route: Route) -> None:
@@ -59,9 +59,6 @@ class Router:
         return mapping.get(self.auth.role, "/login")
 
     def _on_resize(self, e: ft.ControlEvent) -> None:
-        # ✅ CORRECTION : n'appelle plus _on_route_change avec un faux
-        # RouteChangeEvent (signature incompatible avec cette version de
-        # Flet) — appelle directement _render_route avec la route actuelle.
         if self.page.route:
             self._render_route(self.page.route)
 
@@ -120,6 +117,7 @@ class Router:
             return ft.View(
                 route=route.path,
                 appbar=nav["appbar"],
+                drawer=nav.get("drawer"),  # ✅ FIX : tiroir attaché à cette View précise
                 controls=original_view.controls,
                 bgcolor=original_view.bgcolor or Colors.BACKGROUND,
                 padding=original_view.padding,
