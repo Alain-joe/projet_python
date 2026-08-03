@@ -2,6 +2,10 @@
 views/shared/navigation.py — Barre de navigation avec indicateur de notifications.
 Compatible Flet 0.86.3
 CORRECTION : Ajout des entrées spécifiques pour le rôle CLIENT.
+CORRECTION : Détection de largeur centralisée et sécurisée (repli 1200
+si page.width/page.window.width sont None) — cohérente avec le nouveau
+page.on_resize ajouté dans core/router.py, qui redéclenche le rendu dès
+que la vraie largeur est connue.
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -23,16 +27,14 @@ NAV_ITEMS: list[NavItem] = [
     NavItem("Tableau de bord", ft.Icons.DASHBOARD, "/dashboard/secretariat", allowed_roles=(Role.SECRETARIAT,)),
     NavItem("Tableau de bord", ft.Icons.DASHBOARD, "/dashboard/agent", allowed_roles=(Role.AGENT,)),
     NavItem("Tableau de bord", ft.Icons.DASHBOARD, "/dashboard/client", allowed_roles=(Role.CLIENT,)),
-    
+
     NavItem("Mon Profil", ft.Icons.PERSON, "/profil"),
     NavItem("Carte interactive", ft.Icons.MAP, "/carte"),
-    
-    # ✅ NOUVEAUX ÉLÉMENTS CLIENT
+
     NavItem("Mes réservations", ft.Icons.EVENT_NOTE, "/reservations/mine", allowed_roles=(Role.CLIENT,)),
     NavItem("Mes exhumations", ft.Icons.UNARCHIVE, "/exhumations/client", allowed_roles=(Role.CLIENT,)),
     NavItem("Mes paiements", ft.Icons.PAYMENTS, "/finance/client-paiements", allowed_roles=(Role.CLIENT,)),
-    
-    # ÉLÉMENTS ADMIN / SECRÉTARIAT / AGENT
+
     NavItem("Réservations", ft.Icons.EVENT_NOTE, "/reservations", allowed_roles=(Role.ADMIN, Role.SECRETARIAT, Role.AGENT)),
     NavItem("Concessions", ft.Icons.DESCRIPTION, "/concessions", allowed_roles=(Role.ADMIN, Role.SECRETARIAT)),
     NavItem("Concessions à créer", ft.Icons.PENDING_ACTIONS, "/concessions/ready", allowed_roles=(Role.ADMIN, Role.SECRETARIAT)),
@@ -50,6 +52,19 @@ NAV_ITEMS: list[NavItem] = [
 ]
 
 
+def get_page_width(page: ft.Page) -> int:
+    """
+    Détection de largeur centralisée et sécurisée. page.width et
+    page.window.width peuvent valoir None avant le premier événement
+    on_resize -> repli sur 1200 (desktop) uniquement dans ce cas précis,
+    jamais comme valeur "normale" pour du mobile.
+    """
+    width = getattr(page, "width", None)
+    if not width and hasattr(page, "window") and page.window is not None:
+        width = getattr(page.window, "width", None)
+    return int(width) if width else 1200
+
+
 def _visible_items(auth: AuthState) -> list[NavItem]:
     return [item for item in NAV_ITEMS if item.allowed_roles is None or auth.role in item.allowed_roles]
 
@@ -65,7 +80,7 @@ def side_rail(page: ft.Page, auth: AuthState, unread_count: int = 0) -> ft.Contr
 
     def build_tile(item: NavItem) -> ft.Control:
         is_active = item.route == current
-        
+
         content_row = ft.Row(
             [
                 ft.Icon(item.icon, color=Colors.TEXT_ON_DARK if is_active else Colors.TEXT, size=20),
@@ -73,7 +88,7 @@ def side_rail(page: ft.Page, auth: AuthState, unread_count: int = 0) -> ft.Contr
             ],
             spacing=12,
         )
-        
+
         if item.route == "/notifications" and unread_count > 0:
             content_row.controls.append(
                 ft.Container(
@@ -185,9 +200,9 @@ def build_navigation(page: ft.Page, auth: AuthState) -> dict:
     except Exception:
         pass
 
-    width = getattr(page, 'window', page).width if hasattr(page, 'window') else (getattr(page, 'width', 1200) or 1200)
-    device = get_device_type(width)
-    
+    # ✅ CORRECTION : utilise la détection centralisée get_page_width()
+    device = get_device_type(get_page_width(page))
+
     if device == "mobile":
         return {"appbar": build_app_bar(page, auth, unread_count), "rail": None}
     return {"appbar": None, "rail": side_rail(page, auth, unread_count)}
