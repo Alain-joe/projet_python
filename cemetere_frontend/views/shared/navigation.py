@@ -1,15 +1,20 @@
 """
 views/shared/navigation.py — Barre de navigation avec indicateur de notifications.
 Compatible Flet 0.86.3
-CORRECTION : Ajout des entrées spécifiques pour le rôle CLIENT.
-CORRECTION : Détection de largeur centralisée et sécurisée (repli 1200
-si page.width/page.window.width sont None).
-CORRECTION CRITIQUE : page.open(drawer) n'existe pas sur cette build de
-Flet ('Page' object has no attribute 'open') — même limitation déjà
-rencontrée avec les DatePicker/TimePicker. Le NavigationDrawer ne passant
-pas par page.overlay, ajout d'une fonction _open_drawer() dédiée qui
-retombe sur l'assignation directe (page.drawer + drawer.open = True)
-si page.open() n'est pas disponible.
+
+CORRECTIONS APPLIQUÉES :
+- Entrées spécifiques pour le rôle CLIENT (déjà présent).
+- Détection de largeur centralisée et sécurisée (déjà présent).
+- page.open(drawer) n'existe pas sur cette build de Flet -> _open_drawer()
+  avec repli sur page.drawer + drawer.open = True (déjà présent).
+- ✅ NOUVEAU : page.close(drawer) a la même limitation que page.open() —
+  ajout de _close_drawer() avec repli symétrique (drawer.open = False +
+  page.update()), utilisé après un clic sur une destination du tiroir.
+- ✅ NOUVEAU : le Container(height=12) mélangé dans controls=[...] du
+  NavigationDrawer décalait selected_index de 1 par rapport à la liste
+  items -> cliquer sur une destination pouvait naviguer vers le mauvais
+  élément. Retiré : controls ne contient plus que des
+  NavigationDrawerDestination, dans le même ordre exact que items.
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -86,6 +91,19 @@ def _open_drawer(page: ft.Page, drawer: ft.NavigationDrawer) -> None:
         page.update()
 
 
+def _close_drawer(page: ft.Page, drawer: ft.NavigationDrawer) -> None:
+    """
+    ✅ NOUVEAU : page.close(drawer) a la même limitation que page.open()
+    sur cette build de Flet. Repli symétrique : drawer.open = False,
+    puis page.update().
+    """
+    try:
+        page.close(drawer)
+    except AttributeError:
+        drawer.open = False
+        page.update()
+
+
 def side_rail(page: ft.Page, auth: AuthState, unread_count: int = 0) -> ft.Control:
     items = _visible_items(auth)
     current = page.route
@@ -157,10 +175,13 @@ def side_rail(page: ft.Page, auth: AuthState, unread_count: int = 0) -> ft.Contr
 
 def build_app_bar(page: ft.Page, auth: AuthState, unread_count: int = 0) -> ft.AppBar:
     items = _visible_items(auth)
+
+    # ✅ FIX : uniquement des NavigationDrawerDestination — plus de
+    # Container mélangé, qui décalait selected_index de 1 par rapport à
+    # items et pouvait faire naviguer vers le mauvais élément.
     drawer = ft.NavigationDrawer(
         controls=[
-            ft.Container(height=12),
-            *[ft.NavigationDrawerDestination(icon=item.icon, label=item.label) for item in items],
+            ft.NavigationDrawerDestination(icon=item.icon, label=item.label) for item in items
         ],
     )
 
@@ -168,7 +189,7 @@ def build_app_bar(page: ft.Page, auth: AuthState, unread_count: int = 0) -> ft.A
         index = e.control.selected_index
         if index is not None and 0 <= index < len(items):
             _go(page, items[index].route)
-            page.close(drawer)
+            _close_drawer(page, drawer)  # ✅ FIX : repli défensif, comme _open_drawer
 
     drawer.on_change = on_drawer_change
     page.drawer = drawer
@@ -195,7 +216,6 @@ def build_app_bar(page: ft.Page, auth: AuthState, unread_count: int = 0) -> ft.A
     return ft.AppBar(
         title=ft.Text("Cimetière Connect", weight=ft.FontWeight.W_700, color=Colors.PRIMARY),
         bgcolor="#FFFFFF",
-        # ✅ CORRECTION : _open_drawer() au lieu de page.open(drawer) directement
         leading=ft.IconButton(ft.Icons.MENU, on_click=lambda _: _open_drawer(page, drawer)),
         actions=[
             bell_button,
