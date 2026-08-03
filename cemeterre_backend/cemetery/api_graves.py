@@ -1,13 +1,25 @@
 """
 cemetery/api_graves.py — Endpoints pour la gestion des caveaux.
 Compatible Django Ninja + JWT.
-CORRECTION : Ajout de jwt_auth_or_query_param pour permettre le token en URL (pour la carte).
+
+CORRECTION CRITIQUE : jwt_auth_or_query_param appelait
+JWTAuth().authenticate(request) avec un seul argument, alors que cette
+méthode (héritée de HttpBearer) attend authenticate(self, request, token)
+— le token doit être extrait du header et passé explicitement.
+Cet appel levait donc systématiquement une TypeError, silencieusement
+avalée par le except Exception: pass, ce qui faisait échouer TOUTE
+authentification par header Authorization sur cette fonction, même avec
+un token parfaitement valide. Seul le repli sur ?token=... dans l'URL
+fonctionnait (utilisé uniquement par la carte). Corrigé : extraction
+manuelle du header Authorization, validation explicite du token JWT.
 """
 import math
 from ninja import Router, Schema
 from ninja_jwt.authentication import JWTAuth
+from ninja_jwt.tokens import AccessToken
 from ninja.errors import HttpError
 from django.shortcuts import get_object_or_404
+from django.contrib.auth import get_user_model
 from django.contrib.gis.geos import Point
 from .models import Grave, Section
 from .schemas import GraveIn, GraveUpdate, GraveOut, GenerateGridSchema
@@ -20,23 +32,31 @@ router = Router(auth=JWTAuth(), tags=["Graves"])
 # ==============================================================================
 def jwt_auth_or_query_param(request):
     """Authentifie via le header Authorization OU via le paramètre ?token=... dans l'URL."""
-    try:
-        user = JWTAuth().authenticate(request)
-        if user:
-            return user
-    except Exception:
-        pass
-    
-    token = request.GET.get("token")
-    if token:
+    User = get_user_model()
+
+    def _user_from_token(token: str):
+        valid_token = AccessToken(token)
+        return User.objects.get(id=valid_token["user_id"])
+
+    # ✅ FIX : extraction manuelle du header Authorization: Bearer <token>.
+    # JWTAuth().authenticate(request) seul levait toujours une TypeError
+    # (argument token manquant), avalée par le except -> échec permanent
+    # de l'authentification par header sur cette fonction.
+    auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+    if auth_header.startswith("Bearer "):
+        header_token = auth_header.split(" ", 1)[1].strip()
         try:
-            from ninja_jwt.tokens import AccessToken
-            from django.contrib.auth import get_user_model
-            valid_token = AccessToken(token)
-            User = get_user_model()
-            return User.objects.get(id=valid_token["user_id"])
+            return _user_from_token(header_token)
+        except Exception:
+            pass  # on retombe sur le paramètre ?token=... ci-dessous
+
+    query_token = request.GET.get("token")
+    if query_token:
+        try:
+            return _user_from_token(query_token)
         except Exception:
             raise HttpError(401, "Token d'authentification invalide ou expiré.")
+
     raise HttpError(401, "Non authentifié. Token manquant.")
 
 
@@ -63,11 +83,11 @@ def get_available_graves(request, section_id: int = None):
     return queryset
 
 
-@router.get("/graves-geojson/", auth=jwt_auth_or_query_param) # ✅ CORRECTION ICI
+@router.get("/graves-geojson/", auth=jwt_auth_or_query_param)
 def get_graves_geojson(request):
     """Endpoint optimisé pour la carte Leaflet (format GeoJSON)."""
     graves = Grave.objects.select_related("section__cemetery").all()
-    
+
     features = []
     for grave in graves:
         if grave.location:
@@ -86,7 +106,7 @@ def get_graves_geojson(request):
                     "grave_type": grave.grave_type or "Simple"
                 }
             })
-    
+
     return {
         "type": "FeatureCollection",
         "features": features
@@ -122,23 +142,23 @@ def generate_graves_grid(request, data: GenerateGridSchema):
     section = get_object_or_404(Section, id=data.section_id)
     created_count = 0
     counter = 1
-    
+
     lat_offset_per_m = 1.0 / 111111.0
     lng_offset_per_m = 1.0 / (111111.0 * math.cos(math.radians(data.start_lat)))
-    
+
     for r in range(data.rows):
         for c in range(data.cols):
             current_lat = data.start_lat - (r * data.spacing_meters * lat_offset_per_m)
             current_lng = data.start_lng + (c * data.spacing_meters * lng_offset_per_m)
-            
+
             base_code = f"{data.prefix}-{counter:03d}"
             code = base_code
             suffix = 1
-            
+
             while Grave.objects.filter(code=code).exists():
                 code = f"{data.prefix}-{counter:03d}-{suffix}"
                 suffix += 1
-            
+
             Grave.objects.create(
                 section=section,
                 code=code,
@@ -152,7 +172,7 @@ def generate_graves_grid(request, data: GenerateGridSchema):
             )
             created_count += 1
             counter += 1
-            
+
     return {
         "message": f"{created_count} caveaux générés avec succès dans la section '{section.name}'.",
         "created_count": created_count,
@@ -167,7 +187,7 @@ def create_grave(request, data: GraveIn):
     location = None
     if data.latitude is not None and data.longitude is not None:
         location = Point(data.longitude, data.latitude, srid=4326)
-    
+
     grave = Grave.objects.create(
         section_id=data.section_id,
         code=data.code,
@@ -196,17 +216,17 @@ def get_grave(request, grave_id: int):
 @require_role("admin", "agent")
 def update_grave(request, grave_id: int, data: GraveUpdate):
     grave = get_object_or_404(Grave, id=grave_id)
-    
+
     update_fields = []
     for field, value in data.dict(exclude_unset=True).items():
         if field not in ["latitude", "longitude"]:
             setattr(grave, field, value)
             update_fields.append(field)
-    
+
     if data.latitude is not None and data.longitude is not None:
         grave.location = Point(data.longitude, data.latitude, srid=4326)
         update_fields.append("location")
-    
+
     grave.save(update_fields=update_fields)
     return {"message": "Caveau mis à jour avec succès"}
 
@@ -215,9 +235,9 @@ def update_grave(request, grave_id: int, data: GraveUpdate):
 @require_role("admin")
 def delete_grave(request, grave_id: int):
     grave = get_object_or_404(Grave, id=grave_id)
-    
+
     if hasattr(grave, "concession") and grave.concession and grave.concession.status == "active":
         return {"error": "Impossible de supprimer : ce caveau a une concession active"}
-    
+
     grave.delete()
     return {"message": "Caveau supprimé"}
