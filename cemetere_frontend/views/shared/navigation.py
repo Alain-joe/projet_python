@@ -5,16 +5,16 @@ Compatible Flet 0.86.3
 CORRECTIONS APPLIQUÉES :
 - Entrées spécifiques pour le rôle CLIENT (déjà présent).
 - Détection de largeur centralisée et sécurisée (déjà présent).
-- page.open(drawer) n'existe pas sur cette build de Flet -> _open_drawer()
-  avec repli sur page.drawer + drawer.open = True (déjà présent).
-- ✅ NOUVEAU : page.close(drawer) a la même limitation que page.open() —
-  ajout de _close_drawer() avec repli symétrique (drawer.open = False +
-  page.update()), utilisé après un clic sur une destination du tiroir.
-- ✅ NOUVEAU : le Container(height=12) mélangé dans controls=[...] du
-  NavigationDrawer décalait selected_index de 1 par rapport à la liste
-  items -> cliquer sur une destination pouvait naviguer vers le mauvais
-  élément. Retiré : controls ne contient plus que des
-  NavigationDrawerDestination, dans le même ordre exact que items.
+- ✅ NOUVEAU : suppression totale de la tentative page.open()/page.close()
+  pour le NavigationDrawer. Contrairement au DatePicker/TimePicker (où
+  page.open() lève une AttributeError franche, détectable), page.open()
+  peut très bien exister et ne lever AUCUNE exception pour un
+  NavigationDrawer tout en ne l'affichant pas correctement -> le
+  try/except restait alors bloqué en silence, sans jamais tomber sur le
+  repli. On utilise désormais UNIQUEMENT l'assignation directe
+  (page.drawer + drawer.open = True/False + page.update()), méthode
+  connue pour fonctionner de façon fiable sur cette build.
+- Container mélangé dans le drawer retiré (décalait selected_index).
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -79,29 +79,19 @@ def _go(page: ft.Page, route: str) -> None:
 
 def _open_drawer(page: ft.Page, drawer: ft.NavigationDrawer) -> None:
     """
-    page.open(drawer) n'existe pas sur cette build de Flet
-    ('Page' object has no attribute 'open'). Repli : assignation directe
-    de page.drawer + drawer.open = True, suivie d'un page.update().
+    ✅ FIX : plus de tentative page.open() — assignation directe
+    uniquement, seule méthode fiable observée sur cette build de Flet
+    pour un NavigationDrawer.
     """
-    try:
-        page.open(drawer)
-    except AttributeError:
-        page.drawer = drawer
-        drawer.open = True
-        page.update()
+    page.drawer = drawer
+    drawer.open = True
+    page.update()
 
 
 def _close_drawer(page: ft.Page, drawer: ft.NavigationDrawer) -> None:
-    """
-    ✅ NOUVEAU : page.close(drawer) a la même limitation que page.open()
-    sur cette build de Flet. Repli symétrique : drawer.open = False,
-    puis page.update().
-    """
-    try:
-        page.close(drawer)
-    except AttributeError:
-        drawer.open = False
-        page.update()
+    """✅ FIX : symétrique de _open_drawer, assignation directe uniquement."""
+    drawer.open = False
+    page.update()
 
 
 def side_rail(page: ft.Page, auth: AuthState, unread_count: int = 0) -> ft.Control:
@@ -176,9 +166,6 @@ def side_rail(page: ft.Page, auth: AuthState, unread_count: int = 0) -> ft.Contr
 def build_app_bar(page: ft.Page, auth: AuthState, unread_count: int = 0) -> ft.AppBar:
     items = _visible_items(auth)
 
-    # ✅ FIX : uniquement des NavigationDrawerDestination — plus de
-    # Container mélangé, qui décalait selected_index de 1 par rapport à
-    # items et pouvait faire naviguer vers le mauvais élément.
     drawer = ft.NavigationDrawer(
         controls=[
             ft.NavigationDrawerDestination(icon=item.icon, label=item.label) for item in items
@@ -189,7 +176,7 @@ def build_app_bar(page: ft.Page, auth: AuthState, unread_count: int = 0) -> ft.A
         index = e.control.selected_index
         if index is not None and 0 <= index < len(items):
             _go(page, items[index].route)
-            _close_drawer(page, drawer)  # ✅ FIX : repli défensif, comme _open_drawer
+            _close_drawer(page, drawer)
 
     drawer.on_change = on_drawer_change
     page.drawer = drawer

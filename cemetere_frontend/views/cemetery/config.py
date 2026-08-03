@@ -3,15 +3,13 @@ views/cemetery/config.py — Configuration du cimetière (Admin uniquement).
 Compatible Flet 0.86.0
 
 CORRECTIONS APPLIQUÉES :
-- BUG CRITIQUE : float(champ.value) était appelé AVANT le bloc try,
-  donc une valeur non numérique (ex: "abc") faisait planter la fonction
-  sans message d'erreur et laissait submit_loading bloqué indéfiniment.
-  Corrigé : validation explicite AVANT toute conversion, avec message
-  précis, le try ne contient plus que l'appel réseau.
-- Ajout de la validation : champs obligatoires (nom, ville), superficie
-  et dimensions doivent être des nombres strictement positifs dans une
-  plage raisonnable.
-- page.window.width sécurisé avec repli 1200.
+- float(champ.value) déplacé après une validation explicite (déjà fait
+  précédemment).
+- ✅ NOUVEAU : un 404 ("aucun cimetière configuré") est maintenant traité
+  comme un état normal (formulaire vide à remplir), pas comme une
+  erreur serveur — cohérent avec le fix apporté côté backend
+  (get_cemetery_config lève désormais HttpError(404, ...) proprement
+  au lieu de planter avec un 500).
 """
 from __future__ import annotations
 import flet as ft
@@ -36,6 +34,7 @@ def build_cemetery_config_view(page: ft.Page, auth: AuthState) -> ft.View:
 
     def load_config() -> None:
         loading.visible = True
+        error_text.visible = False
         page.update()
         try:
             data = auth.api.get(Endpoints.CEMETERY_CONFIG)
@@ -48,8 +47,14 @@ def build_cemetery_config_view(page: ft.Page, auth: AuthState) -> ft.View:
             grave_length_field.value = str(data.get("grave_length", 2.5))
             grave_width_field.value = str(data.get("grave_width", 1.2))
         except ApiError as exc:
-            error_text.value = f"Erreur de chargement : {exc.message}"
-            error_text.visible = True
+            # ✅ FIX : un 404 signifie "pas encore configuré" -> ce n'est
+            # pas une erreur pour l'utilisateur, juste un formulaire vide
+            # (avec les valeurs par défaut déjà présentes dans les champs).
+            if exc.status_code == 404:
+                error_text.visible = False
+            else:
+                error_text.value = f"Erreur de chargement : {exc.message}"
+                error_text.visible = True
         finally:
             loading.visible = False
             page.update()
@@ -104,9 +109,6 @@ def build_cemetery_config_view(page: ft.Page, auth: AuthState) -> ft.View:
         success_text.visible = False
         page.update()
 
-        # ✅ FIX : toute la validation/conversion se fait AVANT d'afficher
-        # le spinner et AVANT le bloc try — plus aucun risque de crash
-        # silencieux sur une valeur non numérique.
         payload, error = validate()
         if error:
             error_text.value = error
