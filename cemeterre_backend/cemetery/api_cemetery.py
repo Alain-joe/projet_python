@@ -1,15 +1,24 @@
 """
 projet_cimetiere/cemeterre_backend/cemetery/api_cemetery.py
 API pour la gestion du cimetière.
-CORRECTION : Ajout de jwt_auth_or_query_param sur l'endpoint /config/ pour la carte.
+
+CORRECTIONS APPLIQUÉES :
+- jwt_auth_or_query_param sur /config/ (déjà présent, corrigé dans
+  api_graves.py — voir ce fichier).
+- ✅ BUG CRITIQUE : get_cemetery_config() déclare response=CemeteryOut,
+  donc Django Ninja valide automatiquement la réponse contre ce schéma.
+  Quand aucun cimetière n'existe, la fonction retournait un dict
+  {"error": "..."} qui ne correspond à AUCUN champ de CemeteryOut ->
+  échec de validation Pydantic -> 500 Internal Server Error au lieu
+  d'un message propre. Corrigé : HttpError(404, ...) explicite.
 """
 from ninja import Router
+from ninja.errors import HttpError
 from ninja_jwt.authentication import JWTAuth
 from django.shortcuts import get_object_or_404
 from django.db.models import Count, Q
 import math
 
-# ✅ IMPORT DE LA FONCTION D'AUTHENTIFICATION FLEXIBLE
 from .api_graves import jwt_auth_or_query_param
 
 from .models import Cemetery, Grave, Section, Allee
@@ -29,12 +38,14 @@ def list_cemeteries(request):
     return Cemetery.objects.all()
 
 
-@router.get("/config/", response=CemeteryOut, auth=jwt_auth_or_query_param) # ✅ CORRECTION ICI
+@router.get("/config/", response=CemeteryOut, auth=jwt_auth_or_query_param)
 def get_cemetery_config(request):
     """Récupère la configuration du cimetière unique avec ses limites (bounds) pour la carte."""
     cemetery = Cemetery.objects.first()
     if not cemetery:
-        return {"error": "Aucun cimetière configuré. Veuillez initialiser la configuration."}
+        # ✅ FIX : HttpError explicite au lieu d'un dict {"error": ...}
+        # qui ne respecte pas response=CemeteryOut et provoquait un 500.
+        raise HttpError(404, "Aucun cimetière configuré. Veuillez initialiser la configuration.")
 
     bounds = None
     if cemetery.latitude and cemetery.longitude and cemetery.longueur_totale and cemetery.largeur_totale:
