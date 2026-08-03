@@ -3,13 +3,13 @@ core/router.py — Navigation par rôle (RBAC) avec dispatchers.
 Compatible Flet 0.86.3
 CORRECTION : Suppression de la route /cimetiere/alleys (dessin d'allées abandonné
 au profit d'une configuration standard en une seule étape).
-CORRECTION : Ajout de page.on_resize pour redéclencher le rendu de la route
-courante -> corrige la détection du mode mobile/desktop, qui utilisait
-page.width/page.window.width alors que ces valeurs sont souvent None ou
-obsolètes au tout premier rendu (avant le premier événement de resize).
-C'est la cause principale du problème "pas responsive sur mobile" :
-au premier chargement, device était calculé comme "desktop" par défaut,
-donc la barre latérale fixe (240px) s'affichait au lieu de l'AppBar mobile.
+CORRECTION CRITIQUE : _on_resize plantait avec
+"TypeError: RouteChangeEvent.__init__() missing 2 required positional
+arguments: 'name' and 'control'" — cette version de Flet exige ces deux
+arguments en plus de 'route'. Correctif : la logique de rendu de route est
+extraite dans _render_route(path), qui ne nécessite aucun objet Event.
+_on_route_change et _on_resize appellent tous les deux cette méthode
+commune, évitant de construire un RouteChangeEvent factice.
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -35,8 +35,8 @@ class Router:
         self.auth = auth
         self._routes: dict[str, Route] = {}
         self.page.on_route_change = self._on_route_change
-        # ✅ CORRECTION : redéclenche le rendu de la route courante quand la
-        # taille réelle de la fenêtre/viewport est connue (mobile notamment).
+        # ✅ Redéclenche le rendu de la route courante quand la taille réelle
+        # de la fenêtre/viewport est connue (corrige le mode mobile).
         self.page.on_resize = self._on_resize
 
     def register(self, route: Route) -> None:
@@ -59,13 +59,17 @@ class Router:
         return mapping.get(self.auth.role, "/login")
 
     def _on_resize(self, e: ft.ControlEvent) -> None:
-        # Re-render la route actuelle avec la largeur désormais connue,
-        # pour que get_device_type() bascule correctement mobile/desktop.
+        # ✅ CORRECTION : n'appelle plus _on_route_change avec un faux
+        # RouteChangeEvent (signature incompatible avec cette version de
+        # Flet) — appelle directement _render_route avec la route actuelle.
         if self.page.route:
-            self._on_route_change(ft.RouteChangeEvent(route=self.page.route))
+            self._render_route(self.page.route)
 
     def _on_route_change(self, e: ft.RouteChangeEvent) -> None:
-        target_path = e.route.split("?")[0].rstrip("/")
+        self._render_route(e.route)
+
+    def _render_route(self, raw_route: str) -> None:
+        target_path = raw_route.split("?")[0].rstrip("/")
         route = self._routes.get(target_path)
         if route is None:
             self._render_not_found()
@@ -230,9 +234,6 @@ def build_routes(auth: AuthState) -> list[Route]:
     from views.reports.logs import build_audit_logs_view
     from views.cemetery.config import build_cemetery_config_view
 
-    # ✅ CORRECTION : suppression de l'import de views.cemetery.alleys_setup
-    # (fichier obsolète — le dessin d'allées a été remplacé par une
-    # configuration standard en une seule étape dans initial_setup.py)
     from views.cemetery.initial_setup import build_initial_setup_view
     from views.cemetery.sections_list import build_sections_list_view
     from views.cemetery.alleys_list import build_alleys_list_view
@@ -260,7 +261,6 @@ def build_routes(auth: AuthState) -> list[Route]:
         Route("/dashboard/agent", build_agent_dashboard_view, allowed_roles=(Role.AGENT,)),
         Route("/dashboard/client", build_client_dashboard_view, allowed_roles=(Role.CLIENT,)),
 
-        # ✅ CORRECTION : route /cimetiere/alleys supprimée (obsolète)
         Route("/cimetiere/setup", build_initial_setup_view, allowed_roles=(Role.ADMIN,)),
         Route("/cimetiere/sections", build_sections_list_view, allowed_roles=(Role.ADMIN, Role.SECRETARIAT)),
         Route("/cimetiere/alleys-list", build_alleys_list_view, allowed_roles=(Role.ADMIN, Role.SECRETARIAT)),
