@@ -1,15 +1,25 @@
 """
 views/auth/login.py — Écran de connexion moderne et épuré.
+CORRECTION : Mise en page responsive — la carte et les champs étaient en
+largeur fixe (450px / 400px), ce qui débordait sur un écran de téléphone
+(souvent 360-390px de large). Largeur désormais calculée selon le device.
 """
 
 import flet as ft
 
 from core.auth import AuthState
 from core.theme import Colors, heading_style
+from views.shared.navigation import get_page_width, get_device_type
 
 
 def build_login_view(page: ft.Page, auth: AuthState) -> ft.View:
-    # Champs de saisie avec icônes
+    device = get_device_type(get_page_width(page))
+    is_mobile = device == "mobile"
+
+    card_width = None if is_mobile else 450
+    field_width = None if is_mobile else 400
+    button_width = None if is_mobile else 400
+
     username_field = ft.TextField(
         label="Nom d'utilisateur",
         hint_text="Entrez votre nom d'utilisateur",
@@ -22,7 +32,7 @@ def build_login_view(page: ft.Page, auth: AuthState) -> ft.View:
         content_padding=15,
         expand=True,
     )
-    
+
     password_field = ft.TextField(
         label="Mot de passe",
         hint_text="Entrez votre mot de passe",
@@ -35,24 +45,24 @@ def build_login_view(page: ft.Page, auth: AuthState) -> ft.View:
         content_padding=15,
         expand=True,
     )
-    
+
     error_text = ft.Text("", color=Colors.ERROR, size=13, visible=False)
     loading = ft.ProgressRing(visible=False, width=20, height=20, stroke_width=2, color=Colors.TEXT_ON_DARK)
-    
-    # Contenu du bouton (normal vs loading)
+
     btn_content_normal = ft.Row([
         ft.Icon(ft.Icons.LOGIN, color=Colors.TEXT_ON_DARK),
         ft.Text("Se connecter", color=Colors.TEXT_ON_DARK, weight=ft.FontWeight.BOLD)
     ], alignment=ft.MainAxisAlignment.CENTER, spacing=10)
-    
+
     btn_content_loading = ft.Row([
         ft.ProgressRing(width=20, height=20, stroke_width=2, color=Colors.TEXT_ON_DARK),
         ft.Text("Connexion...", color=Colors.TEXT_ON_DARK, weight=ft.FontWeight.BOLD)
     ], alignment=ft.MainAxisAlignment.CENTER, spacing=10)
 
+    # ✅ CORRECTION : width=400 fixe -> button_width (None sur mobile = pleine largeur du parent)
     login_button = ft.ElevatedButton(
         content=btn_content_normal,
-        width=400,
+        width=button_width,
         height=50,
         style=ft.ButtonStyle(
             bgcolor=Colors.PRIMARY,
@@ -60,7 +70,7 @@ def build_login_view(page: ft.Page, auth: AuthState) -> ft.View:
             padding=15,
         ),
     )
-    
+
     def set_loading(is_loading: bool) -> None:
         loading.visible = is_loading
         login_button.disabled = is_loading
@@ -97,7 +107,7 @@ def build_login_view(page: ft.Page, auth: AuthState) -> ft.View:
     login_button.on_click = on_login_click
     password_field.on_submit = on_login_click
 
-    # Carte de connexion principale
+    # ✅ CORRECTION : width=450 fixe -> card_width (None sur mobile), padding réduit
     login_card = ft.Container(
         content=ft.Column(
             [
@@ -109,7 +119,7 @@ def build_login_view(page: ft.Page, auth: AuthState) -> ft.View:
                 ft.Container(height=10),
                 ft.Text(
                     "Gestion de Cimetière",
-                    size=28,
+                    size=24 if is_mobile else 28,
                     weight=ft.FontWeight.BOLD,
                     color=Colors.TEXT,
                     text_align=ft.TextAlign.CENTER,
@@ -130,19 +140,20 @@ def build_login_view(page: ft.Page, auth: AuthState) -> ft.View:
                 ft.Row(
                     [login_button],
                     alignment=ft.MainAxisAlignment.CENTER,
+                    expand=is_mobile,
                 ),
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=0,
         ),
-        padding=40,
-        bgcolor="#FFFFFF",  # ✅ CORRECTION : Utilisation directe de la valeur hexadécimale
+        padding=20 if is_mobile else 40,
+        bgcolor="#FFFFFF",
         border_radius=20,
-        width=450,
+        width=card_width,
         shadow=ft.BoxShadow(
             spread_radius=0,
             blur_radius=20,
-            color="#0000001A",  # 10% d'opacité noire
+            color="#0000001A",
         ),
     )
 
@@ -153,8 +164,11 @@ def build_login_view(page: ft.Page, auth: AuthState) -> ft.View:
                 content=login_card,
                 alignment=ft.alignment.Alignment(0, 0),
                 expand=True,
+                # ✅ Marge horizontale sur mobile pour éviter que la carte touche les bords
+                padding=ft.Padding(left=16, right=16, top=16, bottom=16) if is_mobile else 0,
             )
         ],
         bgcolor=Colors.BACKGROUND,
         padding=0,
+        scroll=ft.ScrollMode.AUTO,
     )

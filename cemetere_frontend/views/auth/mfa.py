@@ -1,21 +1,27 @@
 """
 views/auth/mfa.py — Saisie du code OTP reçu par email.
 Design moderne et épuré (cohérent avec login.py).
+CORRECTION : Mise en page responsive, même principe que login.py.
 """
 
 import flet as ft
 
 from core.auth import AuthState, Role
 from core.theme import Colors, heading_style
+from views.shared.navigation import get_page_width, get_device_type
 
 
 def build_mfa_view(page: ft.Page, auth: AuthState) -> ft.View:
-    # Vérification de sécurité
     if auth._pending_user_id is None and not auth.is_authenticated:
         page.go("/login")
         return ft.View(route="/mfa", controls=[])
 
-    # Champ de saisie du code
+    device = get_device_type(get_page_width(page))
+    is_mobile = device == "mobile"
+
+    card_width = None if is_mobile else 450
+    button_width = None if is_mobile else 400
+
     code_field = ft.TextField(
         label="Code à 6 chiffres",
         hint_text="Entrez le code reçu par email",
@@ -30,23 +36,23 @@ def build_mfa_view(page: ft.Page, auth: AuthState) -> ft.View:
         content_padding=15,
         expand=True,
     )
-    
+
     error_text = ft.Text("", color=Colors.ERROR, size=13, visible=False)
-    
-    # Contenu du bouton (normal vs loading)
+
     btn_content_normal = ft.Row([
         ft.Icon(ft.Icons.CHECK, color=Colors.TEXT_ON_DARK),
         ft.Text("Valider", color=Colors.TEXT_ON_DARK, weight=ft.FontWeight.BOLD)
     ], alignment=ft.MainAxisAlignment.CENTER, spacing=10)
-    
+
     btn_content_loading = ft.Row([
         ft.ProgressRing(width=20, height=20, stroke_width=2, color=Colors.TEXT_ON_DARK),
         ft.Text("Vérification...", color=Colors.TEXT_ON_DARK, weight=ft.FontWeight.BOLD)
     ], alignment=ft.MainAxisAlignment.CENTER, spacing=10)
 
+    # ✅ CORRECTION : width=400 fixe -> button_width
     verify_button = ft.ElevatedButton(
         content=btn_content_normal,
-        width=400,
+        width=button_width,
         height=50,
         style=ft.ButtonStyle(
             bgcolor=Colors.PRIMARY,
@@ -54,8 +60,7 @@ def build_mfa_view(page: ft.Page, auth: AuthState) -> ft.View:
             padding=15,
         ),
     )
-    
-    # Bouton renvoyer le code
+
     resend_button = ft.TextButton(
         content=ft.Row([
             ft.Icon(ft.Icons.EMAIL, size=16, color=Colors.PRIMARY),
@@ -103,7 +108,6 @@ def build_mfa_view(page: ft.Page, auth: AuthState) -> ft.View:
         redirect_after_success()
 
     def on_resend_click(_: ft.ControlEvent) -> None:
-        # Simulation d'envoi (à connecter au backend plus tard)
         show_error("Un nouveau code vous a été envoyé par email.")
         code_field.value = ""
 
@@ -111,7 +115,7 @@ def build_mfa_view(page: ft.Page, auth: AuthState) -> ft.View:
     code_field.on_submit = on_verify_click
     resend_button.on_click = on_resend_click
 
-    # Carte de vérification MFA
+    # ✅ CORRECTION : width=450 fixe -> card_width, padding réduit sur mobile
     mfa_card = ft.Container(
         content=ft.Column(
             [
@@ -123,7 +127,7 @@ def build_mfa_view(page: ft.Page, auth: AuthState) -> ft.View:
                 ft.Container(height=10),
                 ft.Text(
                     "Vérification en deux étapes",
-                    size=28,
+                    size=22 if is_mobile else 28,
                     weight=ft.FontWeight.BOLD,
                     color=Colors.TEXT,
                     text_align=ft.TextAlign.CENTER,
@@ -142,6 +146,7 @@ def build_mfa_view(page: ft.Page, auth: AuthState) -> ft.View:
                 ft.Row(
                     [verify_button],
                     alignment=ft.MainAxisAlignment.CENTER,
+                    expand=is_mobile,
                 ),
                 ft.Container(height=15),
                 ft.Row(
@@ -152,14 +157,14 @@ def build_mfa_view(page: ft.Page, auth: AuthState) -> ft.View:
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=0,
         ),
-        padding=40,
-        bgcolor="#FFFFFF",  # ✅ CORRECTION : Valeur hexadécimale directe
+        padding=20 if is_mobile else 40,
+        bgcolor="#FFFFFF",
         border_radius=20,
-        width=450,
+        width=card_width,
         shadow=ft.BoxShadow(
             spread_radius=0,
             blur_radius=20,
-            color="#0000001A",  # 10% d'opacité noire
+            color="#0000001A",
         ),
     )
 
@@ -170,8 +175,10 @@ def build_mfa_view(page: ft.Page, auth: AuthState) -> ft.View:
                 content=mfa_card,
                 alignment=ft.alignment.Alignment(0, 0),
                 expand=True,
+                padding=ft.Padding(left=16, right=16, top=16, bottom=16) if is_mobile else 0,
             )
         ],
         bgcolor=Colors.BACKGROUND,
         padding=0,
+        scroll=ft.ScrollMode.AUTO,
     )
