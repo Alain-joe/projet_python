@@ -35,7 +35,9 @@ def build_client_reservations_list_view(page: ft.Page, auth: AuthState) -> ft.Vi
         current_filter = filter_key
         for b in filter_buttons:
             b.style = _filter_style(b == btn)
-        page.update()
+        # ✅ La vue est déjà montée à ce stade (interaction utilisateur) : update() est sûr ici
+        if page.views:
+            page.update()
         render_list()
 
     for key, label in STATUS_FILTERS:
@@ -50,37 +52,42 @@ def build_client_reservations_list_view(page: ft.Page, auth: AuthState) -> ft.Vi
         if current_filter == "terminees": return [r for r in reservations if _is_inhumed(r)]
         return reservations
 
+    def _safe_update() -> None:
+        """✅ CORRECTION : n'appelle page.update() que si la page possède déjà au moins une vue,
+        pour éviter l'erreur 'views list is empty' quand ce code s'exécute avant que la
+        View ait été ajoutée à page.views par le routeur."""
+        if page.views:
+            page.update()
+
     def load_reservations() -> None:
         loading.visible, error_text.visible = True, False
-        page.update()
+        _safe_update()
         try:
-            # ✅ CORRECTION : Appel de l'endpoint spécifique au client
             data = auth.api.get_reservations_mine()
             reservations.clear()
-            if isinstance(data, list): 
+            if isinstance(data, list):
                 reservations.extend(data)
-            elif isinstance(data, dict): 
+            elif isinstance(data, dict):
                 reservations.extend(data.get("items", data.get("results", data.get("data", []))))
             render_list()
         except Exception as exc:
             error_text.value, error_text.visible = f"Erreur : {exc}", True
         finally:
             loading.visible = False
-            page.update()
+            _safe_update()
 
     def build_row(res: dict) -> ft.Control:
         status = res.get("status", "pending")
         inhumed = _is_inhumed(res)
 
-        if inhumed: 
+        if inhumed:
             label, color = "Inhumée", "#496042"
         else:
             label = RESERVATION_STATUS_LABEL.get(status, status)
             color = status_color({"pending": "reserved", "confirmed": "occupied", "cancelled": "non_exploitable"}.get(status, "non_exploitable"))
 
         badge = ft.Container(content=ft.Text(label, size=12, color=Colors.TEXT_ON_DARK), bgcolor=color, padding=8, border_radius=12)
-        
-        # ✅ Pour le client, pas de bouton d'action, juste un affichage
+
         action = ft.Text("—", color=Colors.NEUTRAL, size=14)
 
         date_str = res.get("reservation_date", "")[:10] if res.get("reservation_date") else "Date inconnue"
@@ -93,7 +100,7 @@ def build_client_reservations_list_view(page: ft.Page, auth: AuthState) -> ft.Vi
                     ft.Text(f"Caveau {grave_display}", weight=ft.FontWeight.W_600, size=14),
                     ft.Text(f"Réservée le : {date_str} • Inhumation prévue : {date_prevue}", size=11, color=Colors.NEUTRAL, italic=True),
                 ], spacing=4, expand=True),
-                badge, 
+                badge,
                 action,
             ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             padding=14, bgcolor="#FFFFFF", border_radius=10, border=ft.Border.all(1, Colors.BORDER),
@@ -105,18 +112,27 @@ def build_client_reservations_list_view(page: ft.Page, auth: AuthState) -> ft.Vi
         if not filtered:
             list_container.controls.append(
                 ft.Container(
-                    content=ft.Text("Aucune réservation.", color=Colors.NEUTRAL, italic=True), 
-                    padding=40, 
+                    content=ft.Text("Aucune réservation.", color=Colors.NEUTRAL, italic=True),
+                    padding=40,
                     alignment=ft.Alignment(0.5, 0.5)
                 )
             )
         else:
-            for res in filtered: 
+            for res in filtered:
                 list_container.controls.append(build_row(res))
-        page.update()
+        _safe_update()
 
     device = get_device_type(page.width or 1200)
-    load_reservations()
+
+    # ✅ CORRECTION PRINCIPALE :
+    # On ne charge PAS les données de façon synchrone ici, car cette fonction s'exécute
+    # AVANT que la View retournée ne soit ajoutée à page.views par le routeur.
+    # page.run_task() planifie l'exécution juste après, une fois la vue montée,
+    # ce qui évite l'erreur "views list is empty".
+    async def _initial_load():
+        load_reservations()
+
+    page.run_task(_initial_load)
 
     return ft.View(
         route="/reservations/mine",
