@@ -3,9 +3,13 @@ views/shared/navigation.py — Barre de navigation avec indicateur de notificati
 Compatible Flet 0.86.3
 CORRECTION : Ajout des entrées spécifiques pour le rôle CLIENT.
 CORRECTION : Détection de largeur centralisée et sécurisée (repli 1200
-si page.width/page.window.width sont None) — cohérente avec le nouveau
-page.on_resize ajouté dans core/router.py, qui redéclenche le rendu dès
-que la vraie largeur est connue.
+si page.width/page.window.width sont None).
+CORRECTION CRITIQUE : page.open(drawer) n'existe pas sur cette build de
+Flet ('Page' object has no attribute 'open') — même limitation déjà
+rencontrée avec les DatePicker/TimePicker. Le NavigationDrawer ne passant
+pas par page.overlay, ajout d'une fonction _open_drawer() dédiée qui
+retombe sur l'assignation directe (page.drawer + drawer.open = True)
+si page.open() n'est pas disponible.
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -53,12 +57,6 @@ NAV_ITEMS: list[NavItem] = [
 
 
 def get_page_width(page: ft.Page) -> int:
-    """
-    Détection de largeur centralisée et sécurisée. page.width et
-    page.window.width peuvent valoir None avant le premier événement
-    on_resize -> repli sur 1200 (desktop) uniquement dans ce cas précis,
-    jamais comme valeur "normale" pour du mobile.
-    """
     width = getattr(page, "width", None)
     if not width and hasattr(page, "window") and page.window is not None:
         width = getattr(page.window, "width", None)
@@ -72,6 +70,20 @@ def _visible_items(auth: AuthState) -> list[NavItem]:
 def _go(page: ft.Page, route: str) -> None:
     if page.route != route:
         page.go(route)
+
+
+def _open_drawer(page: ft.Page, drawer: ft.NavigationDrawer) -> None:
+    """
+    page.open(drawer) n'existe pas sur cette build de Flet
+    ('Page' object has no attribute 'open'). Repli : assignation directe
+    de page.drawer + drawer.open = True, suivie d'un page.update().
+    """
+    try:
+        page.open(drawer)
+    except AttributeError:
+        page.drawer = drawer
+        drawer.open = True
+        page.update()
 
 
 def side_rail(page: ft.Page, auth: AuthState, unread_count: int = 0) -> ft.Control:
@@ -183,7 +195,8 @@ def build_app_bar(page: ft.Page, auth: AuthState, unread_count: int = 0) -> ft.A
     return ft.AppBar(
         title=ft.Text("Cimetière Connect", weight=ft.FontWeight.W_700, color=Colors.PRIMARY),
         bgcolor="#FFFFFF",
-        leading=ft.IconButton(ft.Icons.MENU, on_click=lambda _: page.open(drawer)),
+        # ✅ CORRECTION : _open_drawer() au lieu de page.open(drawer) directement
+        leading=ft.IconButton(ft.Icons.MENU, on_click=lambda _: _open_drawer(page, drawer)),
         actions=[
             bell_button,
             ft.IconButton(ft.Icons.LOGOUT, tooltip="Se déconnecter", on_click=lambda _: (auth.logout(), page.go("/login"))),
@@ -200,7 +213,6 @@ def build_navigation(page: ft.Page, auth: AuthState) -> dict:
     except Exception:
         pass
 
-    # ✅ CORRECTION : utilise la détection centralisée get_page_width()
     device = get_device_type(get_page_width(page))
 
     if device == "mobile":

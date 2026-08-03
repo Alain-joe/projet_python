@@ -14,13 +14,21 @@ CORRECTIONS APPLIQUÉES :
   (utilisés dans views/reservations/client_list.py et
   views/exhumations/client_exhumations.py) plantait avec
   AttributeError.
+- ✅ CORRECTION CRITIQUE : _refresh_token() appelait directement
+  self._client.post("/users/token/refresh/", ...) en contournant
+  _request(), qui ajoute automatiquement le préfixe "/api" à tous les
+  autres appels. Résultat : le refresh du token pointait vers une route
+  inexistante (404) et échouait TOUJOURS silencieusement dès qu'un
+  token expirait (30 min) -> message "Session expirée" affiché sur la
+  prochaine page visitée, quelle qu'elle soit. Corrigé en ajoutant le
+  préfixe "/api" explicitement dans cet appel.
 """
 from __future__ import annotations
 import httpx
 from dataclasses import dataclass
 from typing import Any, Optional
 
-BASE_URL ="https://cemetiere-backend-docker.onrender.com"
+BASE_URL = "https://cemetiere-backend-docker.onrender.com"
 TIMEOUT_SECONDS = 60.0
 
 class ApiError(Exception):
@@ -68,7 +76,6 @@ class Endpoints:
     SECTIONS_GEOJSON = "/cemetery/sections/geojson/"
     ALLEES_GEOJSON = "/cemetery/allees/geojson/"
 
-    # ✅ Routes spécifiques Client
     RESERVATIONS_MINE = "/reservations/mine"
     EXHUMATIONS_MINE = "/cemetery/exhumations/mine"
     CONCESSIONS_MINE = "/cemetery/concessions/mine"
@@ -79,7 +86,7 @@ class Endpoints:
     @staticmethod
     def reservation_details(reservation_id: int) -> str:
         return f"/reservations/{reservation_id}/"
-        
+
     @staticmethod
     def reservation_update(reservation_id: int) -> str:
         return f"/reservations/{reservation_id}/"
@@ -87,15 +94,15 @@ class Endpoints:
     FACTURES = "/finance/factures"
     FINANCE_STATS = "/finance/stats/"
     DASHBOARD_STATS = "/reports/dashboard/"
-    
+
     CONCESSIONS = "/cemetery/concessions"
     CONCESSIONS_READY = "/cemetery/concessions/ready-for-creation"
     CONCESSIONS_FROM_RESERVATION = "/cemetery/concessions/from-reservation"
-    
+
     @staticmethod
     def concession_renew(concession_id: int) -> str:
         return f"/cemetery/concessions/{concession_id}/renew"
-        
+
     @staticmethod
     def concession_resilier(concession_id: int) -> str:
         return f"/cemetery/concessions/{concession_id}/resilier"
@@ -128,7 +135,8 @@ class ApiClient:
         if not self.token_provider.refresh_token:
             return False
         try:
-            resp = self._client.post("/users/token/refresh/", json={"refresh": self.token_provider.refresh_token})
+            # ✅ CORRECTION : préfixe /api ajouté explicitement (voir note en tête de fichier)
+            resp = self._client.post("/api/users/token/refresh/", json={"refresh": self.token_provider.refresh_token})
             if resp.status_code == 200:
                 data = resp.json()
                 self.token_provider.on_tokens_refreshed(data["access"], data.get("refresh", self.token_provider.refresh_token))
@@ -139,7 +147,6 @@ class ApiClient:
 
     def _request(self, method: str, path: str, retry_on_401: bool = True, **kwargs) -> Any:
         try:
-            # Ajout automatique du préfixe /api pour les routes Django Ninja
             if not path.startswith("/api/"):
                 path = "/api" + path
 
@@ -191,9 +198,6 @@ class ApiClient:
     def close(self) -> None:
         self._client.close()
 
-    # ✅ Méthodes spécifiques Client (manquaient — utilisées par
-    # views/reservations/client_list.py et
-    # views/exhumations/client_exhumations.py)
     def get_reservations_mine(self) -> Any:
         return self.get(Endpoints.RESERVATIONS_MINE)
 
@@ -203,7 +207,6 @@ class ApiClient:
     def get_concessions_mine(self) -> Any:
         return self.get(Endpoints.CONCESSIONS_MINE)
 
-    # Méthodes de paiement
     def payer_especes(self, facture_id: int, montant: float, reference: str = ""):
         return self.post(f"/finance/factures/{facture_id}/paiement/especes/", json={"montant": montant, "reference": reference})
 
@@ -225,7 +228,6 @@ class ApiClient:
     def get_historique_facture(self, facture_id: int):
         return self.get(f"/finance/factures/{facture_id}/historique/")
 
-    # Méthodes de signalement
     def signaler_probleme_caveau(self, grave_id: int, motif: str, description: str = "", photos: list = None):
         return self.post(f"/cemetery/graves/{grave_id}/signaler-probleme/", json={"motif": motif, "description": description, "photos": photos or []})
 
@@ -273,7 +275,6 @@ class ApiService:
     def reject_user(self, user_id: int):
         return self.client.patch(Endpoints.USER_REJECT.format(user_id=user_id))
 
-    # ✅ Méthodes spécifiques Client
     def get_reservations_mine(self):
         return self.client.get(Endpoints.RESERVATIONS_MINE)
 
