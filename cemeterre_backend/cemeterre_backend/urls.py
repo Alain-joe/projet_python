@@ -6,11 +6,21 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from django.http import JsonResponse
 
 from .api import api
 from cemetery.views import map_view, map_setup_view, graves_geojson
 
+
+# ✅ AJOUT : endpoint de santé pour UptimeRobot (répond toujours 200, sans authentification)
+def health_check(request):
+    return JsonResponse({"status": "ok"})
+
+
 urlpatterns = [
+    # 0. Health check pour le monitoring (UptimeRobot, etc.)
+    path('health/', health_check, name='health_check'),  # ✅ AJOUT
+
     # 1. Interface d'administration Django
     path('admin/', admin.site.urls),
 
